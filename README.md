@@ -20,7 +20,7 @@ This project is intended to be consumed directly from source rather than from Py
 Use this when the consumer project and this repo live on the same machine.
 
 ```bash
-uv add /absolute/path/to/google-saved-lists
+uv add /absolute/path/to/google-saved-list-scraper
 ```
 
 ### Install From Git
@@ -28,7 +28,7 @@ uv add /absolute/path/to/google-saved-lists
 Use this when consumers should install directly from a repository.
 
 ```bash
-uv add git+https://github.com/ORG/google-saved-lists.git
+uv add git+https://github.com/michaelmwu/google-saved-list-scraper.git
 ```
 
 ### Vendor The Source
