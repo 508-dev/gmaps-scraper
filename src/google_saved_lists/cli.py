@@ -10,6 +10,7 @@ from pathlib import Path
 from google_saved_lists.debug_dump import write_debug_dump
 from google_saved_lists.parser import parse_saved_list_artifacts
 from google_saved_lists.scraper import collect_browser_artifacts
+from google_saved_lists.url_tools import extract_list_id
 
 _DEFAULT_DEBUG_DIR_NAME = ".google-saved-lists-debug"
 
@@ -69,6 +70,8 @@ def main() -> int:
         settle_time_ms=args.settle_ms,
     )
     debug_output_dir = _resolve_debug_output_dir(
+        list_url=args.url,
+        resolved_url=artifacts.resolved_url,
         dump_debug_output=args.dump_debug_output,
         debug_output_dir=args.debug_output_dir,
     )
@@ -99,6 +102,8 @@ def main() -> int:
 
 def _resolve_debug_output_dir(
     *,
+    list_url: str,
+    resolved_url: str | None,
     dump_debug_output: bool,
     debug_output_dir: Path | None,
 ) -> Path | None:
@@ -106,4 +111,5 @@ def _resolve_debug_output_dir(
         return debug_output_dir
     if not dump_debug_output:
         return None
-    return Path(os.getcwd()) / _DEFAULT_DEBUG_DIR_NAME
+    list_id = extract_list_id(resolved_url or "") or extract_list_id(list_url) or "unknown-list"
+    return Path(os.getcwd()) / _DEFAULT_DEBUG_DIR_NAME / list_id

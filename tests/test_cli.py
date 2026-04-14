@@ -194,7 +194,7 @@ class CliTests(unittest.TestCase):
                 runtime_state=artifacts.runtime_state,
                 script_texts=artifacts.script_texts,
                 html=artifacts.html,
-                output_dir=Path(tmp_dir) / ".google-saved-lists-debug",
+                output_dir=Path(tmp_dir) / ".google-saved-lists-debug" / "UGEPbA20Qd-OH4uoWjmDgQ",
             )
             self.assertEqual(json.loads(stdout.getvalue()), parsed_payload)
 
