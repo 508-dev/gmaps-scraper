@@ -205,6 +205,48 @@ class ParserTests(unittest.TestCase):
         )
         self.assertTrue(parsed.places[0].is_favorite)
 
+    def test_extracts_favorite_when_place_name_is_missing(self) -> None:
+        runtime_state = [
+            "noise",
+            [
+                ["UGEPbA20Qd-OH4uoWjmDgQ", 1, None, 1, 1],
+                4,
+                "https://www.google.com/maps/placelists/list/UGEPbA20Qd-OH4uoWjmDgQ",
+                "Owner",
+                "Tokyo Dinners",
+                "Best spots in the city",
+                None,
+                None,
+                [
+                    [
+                        None,
+                        [
+                            None,
+                            None,
+                            "",
+                            None,
+                            "Nakameguro, Tokyo",
+                            [None, None, 35.6426886, 139.6988208],
+                            ["6924437575605096209", "-782808945063765017"],
+                            "/g/1pty5xgj1",
+                        ],
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        [[[[3, None, "104356373423434804635", "❤️", [1776133481, 81561000]]]]],
+                    ]
+                ],
+            ],
+        ]
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(len(parsed.places), 1)
+        self.assertEqual(parsed.places[0].address, "Nakameguro, Tokyo")
+        self.assertTrue(parsed.places[0].is_favorite)
+
     def test_raises_when_no_place_records_are_found(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
         runtime_state[1][8] = []

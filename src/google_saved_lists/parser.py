@@ -360,12 +360,13 @@ def _find_place_is_favorite(
     *,
     name: str | None,
 ) -> bool:
-    if name is None:
-        return False
     for ancestor in reversed(ancestors):
         if not isinstance(ancestor, list):
             continue
-        if _clean_text(_safe_index(ancestor, 2)) != name:
+        if not _is_place_record_node(ancestor):
+            continue
+        candidate_name = _clean_text(_safe_index(ancestor, 2))
+        if candidate_name is not None and name is not None and candidate_name != name:
             continue
         return _contains_favorite_marker(ancestor)
     return False
@@ -422,6 +423,11 @@ def _find_google_id(node: list[JSONValue] | None) -> str | None:
 
 def _contains_favorite_marker(node: JSONValue) -> bool:
     return any(value in _FAVORITE_MARKERS for value in _iter_strings(node))
+
+
+def _is_place_record_node(node: list[JSONValue]) -> bool:
+    metadata_node = _safe_index(node, 1)
+    return isinstance(metadata_node, list) and _contains_place_metadata_signal(metadata_node)
 
 
 def _find_list_id_in_node(node: JSONValue) -> str | None:
