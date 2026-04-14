@@ -25,15 +25,15 @@ wheels = [
 
 [[package]]
 name = "cloakbrowser"
-version = "0.3.14"
+version = "0.3.24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "playwright" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/7f/7dc82bb84d730969a8cb07e9ace5e05bf6743e86c27abe40f20fc225d40a/cloakbrowser-0.3.14.tar.gz", hash = "sha256:a876a2748bc80f6b97b657c016aae18172c23e3cb84f2c9bc2ae1b006be8a320", size = 5235633 }
+sdist = { url = "https://files.pythonhosted.org/packages/74/ef/65790b28847a63e5c3708869d423bfc0e2b00f3aee3de525c81ead3d0393/cloakbrowser-0.3.24.tar.gz", hash = "sha256:f0141375cec1eb88ab2c94847894f138fe418aac85e888d3eb96c12d89acb546", size = 5307386 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/3c/9d59ccdf8abc39b85e001cc6185dabcdacfa29b8d82e15115622e7205e54/cloakbrowser-0.3.14-py3-none-any.whl", hash = "sha256:a45fa4c87e78616aef4a3b64ef7dc5edd5fc3abbcb551506e47995f72519a53c", size = 51463 },
+    { url = "https://files.pythonhosted.org/packages/7c/85/51c15bb0b63524b559ba9632d99c95989c274c95502fbcc7ca70c67622be/cloakbrowser-0.3.24-py3-none-any.whl", hash = "sha256:d11e76ebc6a1ecc60adc93d973a2ebb78042f93813cc72c536412e50ed4f675c", size = 60582 },
 ]
 
 [[package]]
