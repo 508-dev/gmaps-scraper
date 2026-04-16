@@ -403,6 +403,43 @@ class HttpArtifactTests(unittest.TestCase):
             "https://www.google.com/maps/preview/entitylist/getlist?pb=123",
         )
 
+    def test_collect_http_artifacts_prefers_entitylist_over_other_preview_links(self) -> None:
+        fake_requests = _FakeCurlRequests(
+            responses=[
+                _FakeHttpResponse(
+                    text=(
+                        "<html><head>"
+                        '<link rel="preload" as="fetch" href="/maps/preview/log204?foo=1">'
+                        '<link rel="preload" as="fetch" '
+                        'href="/maps/preview/entitylist/getlist?pb=123">'
+                        "</head></html>"
+                    ),
+                    url="https://www.google.com/maps/@/data=!3m1!4b1",
+                ),
+                _FakeHttpResponse(
+                    text=")]}'\n[[\"payload\"]]",
+                    url="https://www.google.com/maps/preview/entitylist/getlist?pb=123",
+                ),
+            ]
+        )
+
+        with patch(
+            "gmaps_scraper.scraper._import_curl_requests",
+            return_value=fake_requests,
+        ):
+            artifacts = collect_http_artifacts(
+                "https://maps.app.goo.gl/example",
+                timeout_ms=15_000,
+                http_session=None,
+            )
+
+        self.assertEqual(artifacts.script_texts, [")]}'\n[[\"payload\"]]"])
+        session = fake_requests.sessions[0]
+        self.assertEqual(
+            session.calls[1][0],
+            "https://www.google.com/maps/preview/entitylist/getlist?pb=123",
+        )
+
     def test_collect_http_artifacts_uses_http_session_proxy_and_cookie_jar(self) -> None:
         fake_requests = _FakeCurlRequests(
             responses=[

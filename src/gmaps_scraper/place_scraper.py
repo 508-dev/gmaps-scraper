@@ -502,7 +502,11 @@ def _collect_preview_place_enrichment(
             page_response = session.get(base_url)
             _raise_for_status(page_response)
             page_html = _response_text(page_response)
-            preload_url = _extract_preloaded_fetch_url(page_html, base_url=base_url)
+            preload_url = _extract_preloaded_fetch_url(
+                page_html,
+                base_url=base_url,
+                preferred_path_markers=("preview/place",),
+            )
             if preload_url is None:
                 return {}
             preload_response = session.get(preload_url, referer=base_url)

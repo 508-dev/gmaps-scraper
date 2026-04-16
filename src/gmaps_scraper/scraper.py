@@ -233,6 +233,7 @@ def collect_http_artifacts(
             preload_url = _extract_preloaded_fetch_url(
                 page_html,
                 base_url=resolved_url or list_url,
+                preferred_path_markers=("entitylist/getlist",),
             )
             if preload_url is not None:
                 try:
@@ -546,7 +547,13 @@ def _extract_script_texts_from_html(page_html: str) -> list[str]:
     ]
 
 
-def _extract_preloaded_fetch_url(page_html: str, *, base_url: str) -> str | None:
+def _extract_preloaded_fetch_url(
+    page_html: str,
+    *,
+    base_url: str,
+    preferred_path_markers: tuple[str, ...] = (),
+) -> str | None:
+    candidates: list[str] = []
     for match in _LINK_TAG_PATTERN.finditer(page_html):
         attributes = _extract_html_attributes(match.group(0))
         if attributes.get("as", "").strip().lower() != "fetch":
@@ -554,8 +561,14 @@ def _extract_preloaded_fetch_url(page_html: str, *, base_url: str) -> str | None
         href = html.unescape(attributes.get("href", ""))
         if not href.strip() or "/maps/preview/" not in href:
             continue
-        return urljoin(base_url, href)
-    return None
+        candidates.append(urljoin(base_url, href))
+    if not candidates:
+        return None
+    for marker in preferred_path_markers:
+        for candidate in candidates:
+            if marker in candidate:
+                return candidate
+    return candidates[0]
 
 
 def _extract_html_attributes(tag_html: str) -> dict[str, str]:
