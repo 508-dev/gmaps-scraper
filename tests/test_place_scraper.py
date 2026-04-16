@@ -70,6 +70,22 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(details.lng, 139.7127216)
         self.assertTrue(details.limited_view)
 
+    def test_build_place_details_preserves_zero_coordinates(self) -> None:
+        details = _build_place_details(
+            "https://www.google.com/maps/place/Null+Island",
+            resolved_url="https://www.google.com/maps/place/Null+Island",
+            snapshot={
+                "name": "Null Island",
+                "category": "Tourist attraction",
+                "lat": 0.0,
+                "lng": 0.0,
+                "body_text": "Null Island\nTourist attraction",
+            },
+        )
+
+        self.assertEqual(details.lat, 0.0)
+        self.assertEqual(details.lng, 0.0)
+
     def test_extract_preview_place_enrichment_backfills_core_fields(self) -> None:
         payload_data = [
             None,

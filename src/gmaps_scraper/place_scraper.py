@@ -382,6 +382,12 @@ def _build_place_details(
     combined_lines = _dedupe_lines([*panel_lines, *body_lines])
     name = _clean_text(snapshot.get("name")) or _first_nonempty(search_lines)
     category = _clean_text(snapshot.get("category")) or _extract_category_from_lines(search_lines)
+    lat = _parse_float(snapshot.get("lat"))
+    if lat is None:
+        lat = _extract_coordinate_from_url(resolved_url or source_url, index=0)
+    lng = _parse_float(snapshot.get("lng"))
+    if lng is None:
+        lng = _extract_coordinate_from_url(resolved_url or source_url, index=1)
     return PlaceDetails(
         source_url=source_url,
         resolved_url=resolved_url,
@@ -399,10 +405,8 @@ def _build_place_details(
         plus_code=_clean_text(snapshot.get("plus_code"))
         or _extract_plus_code_from_lines(combined_lines),
         description=_extract_description(snapshot, combined_lines),
-        lat=_parse_float(snapshot.get("lat"))
-        or _extract_coordinate_from_url(resolved_url or source_url, index=0),
-        lng=_parse_float(snapshot.get("lng"))
-        or _extract_coordinate_from_url(resolved_url or source_url, index=1),
+        lat=lat,
+        lng=lng,
         limited_view=_to_bool(snapshot.get("limited_view"))
         or any("limited view of google maps" in line.lower() for line in combined_lines),
     )

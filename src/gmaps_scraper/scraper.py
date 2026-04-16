@@ -18,9 +18,10 @@ type CollectionMode = Literal["auto", "curl", "browser"]
 _CONSENT_URL_MARKERS = ("consent.google", "consent.youtube")
 _HTTP_IMPERSONATE = "chrome"
 DEFAULT_COLLECTION_MODE: CollectionMode = "auto"
-_PRELOADED_FETCH_HREF_PATTERN = re.compile(
-    r'<link\b[^>]*\bhref="([^"]*/maps/preview/[^"]+)"[^>]*\bas="fetch"',
-    re.IGNORECASE,
+_LINK_TAG_PATTERN = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
+_HTML_ATTRIBUTE_PATTERN = re.compile(
+    r"""\b([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(['"])(.*?)\2""",
+    re.DOTALL,
 )
 _SCRIPT_TEXT_PATTERN = re.compile(
     r"<script\b[^>]*>(.*?)</script>",
@@ -493,13 +494,22 @@ def _extract_script_texts_from_html(page_html: str) -> list[str]:
 
 
 def _extract_preloaded_fetch_url(page_html: str, *, base_url: str) -> str | None:
-    match = _PRELOADED_FETCH_HREF_PATTERN.search(page_html)
-    if match is None:
-        return None
-    href = html.unescape(match.group(1))
-    if not href.strip():
-        return None
-    return urljoin(base_url, href)
+    for match in _LINK_TAG_PATTERN.finditer(page_html):
+        attributes = _extract_html_attributes(match.group(0))
+        if attributes.get("as", "").strip().lower() != "fetch":
+            continue
+        href = html.unescape(attributes.get("href", ""))
+        if not href.strip() or "/maps/preview/" not in href:
+            continue
+        return urljoin(base_url, href)
+    return None
+
+
+def _extract_html_attributes(tag_html: str) -> dict[str, str]:
+    return {
+        name.lower(): value
+        for name, _quote, value in _HTML_ATTRIBUTE_PATTERN.findall(tag_html)
+    }
 
 
 def _normalize_response_url(value: object) -> str | None:

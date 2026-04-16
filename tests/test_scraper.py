@@ -340,6 +340,41 @@ class HttpArtifactTests(unittest.TestCase):
         self.assertEqual(artifacts.resolved_url, "https://www.google.com/maps")
         self.assertEqual(artifacts.script_texts, ["const value = 1;"])
 
+    def test_collect_http_artifacts_fetches_preload_with_attributes_in_any_order(self) -> None:
+        fake_requests = _FakeCurlRequests(
+            responses=[
+                _FakeHttpResponse(
+                    text=(
+                        "<html><head>"
+                        "<link rel='preload' as='fetch' "
+                        "href='/maps/preview/entitylist/getlist?pb=123'>"
+                        "</head></html>"
+                    ),
+                    url="https://www.google.com/maps/@/data=!3m1!4b1",
+                ),
+                _FakeHttpResponse(
+                    text=")]}'\n[[\"payload\"]]",
+                    url="https://www.google.com/maps/preview/entitylist/getlist?pb=123",
+                ),
+            ]
+        )
+
+        with patch(
+            "gmaps_scraper.scraper._import_curl_requests",
+            return_value=fake_requests,
+        ):
+            artifacts = collect_http_artifacts(
+                "https://maps.app.goo.gl/example",
+                timeout_ms=15_000,
+            )
+
+        self.assertEqual(artifacts.script_texts, [")]}'\n[[\"payload\"]]"])
+        session = fake_requests.sessions[0]
+        self.assertEqual(
+            session.calls[1][0],
+            "https://www.google.com/maps/preview/entitylist/getlist?pb=123",
+        )
+
 
 class SavedListFallbackTests(unittest.TestCase):
     def test_collect_saved_list_result_prefers_http_when_parse_succeeds(self) -> None:
