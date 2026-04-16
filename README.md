@@ -88,15 +88,28 @@ Available CLI options:
 - `--headed` runs the browser in headed mode
 - `--timeout-ms INTEGER` controls the navigation timeout
 - `--settle-ms INTEGER` adds extra wait time after the page loads
+- `--session-dir PATH` reuses a persistent browser profile and its cookies
+- `--proxy URL` passes a proxy URL through to the browser launch
+  Prefer `GOOGLE_SAVED_LISTS_PROXY` for authenticated proxies so credentials do
+  not appear in shell history or process listings.
 
 ## Library Usage
 
 Import the package directly in application code:
 
 ```python
-from google_saved_lists import scrape_saved_list
+import os
+from pathlib import Path
 
-result = scrape_saved_list("https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18")
+from google_saved_lists import BrowserSessionConfig, scrape_saved_list
+
+result = scrape_saved_list(
+    "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+    browser_session=BrowserSessionConfig(
+        profile_dir=Path(".google-saved-lists/session"),
+        proxy=os.environ["GOOGLE_SAVED_LISTS_PROXY"],
+    ),
+)
 
 print(result.list_id)
 print(result.resolved_url)
@@ -106,6 +119,8 @@ print(result.to_dict())
 
 Public top-level imports intended for consumers:
 
+- `BrowserProxyConfig`
+- `BrowserSessionConfig`
 - `scrape_saved_list`
 - `parse_saved_list_artifacts`
 - `SavedList`
@@ -146,6 +161,11 @@ URL after redirects, which is useful for short `maps.app.goo.gl` links.
 - The scraper is designed for Google Maps saved-list URLs.
 - It uses a real browser session because Google Maps does not expose the required data
   reliably to simple HTTP clients.
+- By default each scrape uses a fresh browser session. Reuse a profile directory only
+  when you want cookies, localStorage, and other browser state to persist across runs.
+- Session rotation, clearing blocked profiles, and coordinating proxies across many
+  scraping identities are caller-level policy decisions. The library only exposes the
+  browser profile and proxy primitives needed to implement that policy.
 - Parsing is defensive and tolerates partial metadata, but Google can change its runtime
   schema at any time.
 - The parser prefers the explicit placelist ID from the resolved URL when available.

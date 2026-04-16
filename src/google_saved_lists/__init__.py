@@ -2,7 +2,12 @@
 
 from google_saved_lists.models import Place, SavedList
 from google_saved_lists.parser import ParseError, parse_saved_list_artifacts
-from google_saved_lists.scraper import ScrapeError, scrape_saved_list
+from google_saved_lists.scraper import (
+    BrowserProxyConfig,
+    BrowserSessionConfig,
+    ScrapeError,
+    scrape_saved_list,
+)
 from google_saved_lists.url_tools import (
     PLACELIST_URL_MARKER,
     extract_list_id,
@@ -12,6 +17,8 @@ from google_saved_lists.url_tools import (
 
 __all__ = [
     "PLACELIST_URL_MARKER",
+    "BrowserProxyConfig",
+    "BrowserSessionConfig",
     "ParseError",
     "Place",
     "SavedList",
