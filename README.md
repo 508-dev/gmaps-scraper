@@ -1,75 +1,67 @@
-# Google Saved List Scraper
+# GMaps Scraper
 
-Extract places from Google Maps saved lists with either a CLI or a Python import.
+Extract data from Google Maps saved lists and individual place pages.
 
-The scraper opens the saved-list URL in a real browser session, reads Google Maps
-runtime data, and returns structured JSON for the list and its places.
+The scraper fetches Google Maps URLs, reads runtime data or the rendered place
+panel, and returns structured JSON.
 
 ## Requirements
 
 - Python `3.14`
 - `uv`
-- `cloakbrowser` as a runtime dependency
+- `curl_cffi` for the primary fetch path
+- `cloakbrowser` for browser mode and HTTP fallback
 
 ## Install
 
 This project is intended to be consumed directly from source rather than from PyPI.
 
-### Install From A Local Checkout
-
-Use this when the consumer project and this repo live on the same machine.
-
 ```bash
-uv add /absolute/path/to/google-saved-list-scraper
+uv add git+https://github.com/michaelmwu/gmaps-scraper.git
 ```
 
-### Install From Git
-
-Use this when consumers should install directly from a repository.
+If you vendor the package, also add the runtime dependency:
 
 ```bash
-uv add git+https://github.com/michaelmwu/google-saved-list-scraper.git
-```
-
-### Vendor The Source
-
-Copy `src/google_saved_lists/` into your project and keep its parent directory on the
-Python import path. If you vendor the package, also add the runtime dependency:
-
-```bash
-uv add cloakbrowser
-```
-
-Example vendored layout:
-
-```text
-your-project/
-  pyproject.toml
-  your_app/
-  google_saved_lists/
-    __init__.py
-    cli.py
-    models.py
-    parser.py
-    scraper.py
-    url_tools.py
-    py.typed
+uv add curl-cffi cloakbrowser
 ```
 
 ## CLI
 
-The package installs a `google-saved-lists` command.
+The package installs a `gmaps-scraper` command.
 
 Basic usage:
 
 ```bash
-uv run google-saved-lists "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18"
+uv run gmaps-scraper "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18"
 ```
+
+Scrape a place page:
+
+```bash
+uv run gmaps-scraper \
+  "https://www.google.com/maps/place/Den/@35.6731762,139.7127216,17z" \
+  --kind place
+```
+
+Explicit fetch modes:
+
+```bash
+uv run gmaps-scraper URL --fetch-mode auto
+uv run gmaps-scraper URL --fetch-mode curl
+uv run gmaps-scraper URL --fetch-mode browser
+```
+
+Mode behavior:
+
+- `auto` uses `curl_cffi` first and falls back to the browser if parsing fails
+- `curl` uses only the HTTP path
+- `browser` uses only the browser path
 
 Write JSON to a file:
 
 ```bash
-uv run google-saved-lists \
+uv run gmaps-scraper \
   "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18" \
   --output saved-list.json
 ```
@@ -77,15 +69,17 @@ uv run google-saved-lists \
 Run with a visible browser for debugging:
 
 ```bash
-uv run google-saved-lists \
+uv run gmaps-scraper \
   "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18" \
   --headed
 ```
 
 Available CLI options:
 
+- `--kind {list,place}` selects which scraper to run
 - `--output PATH` writes the JSON result to a file
 - `--headed` runs the browser in headed mode
+- `--fetch-mode {auto,curl,browser}` selects the transport path
 - `--timeout-ms INTEGER` controls the navigation timeout
 - `--settle-ms INTEGER` adds extra wait time after the page loads
 
@@ -94,22 +88,26 @@ Available CLI options:
 Import the package directly in application code:
 
 ```python
-from google_saved_lists import scrape_saved_list
+from gmaps_scraper import scrape_place, scrape_saved_list
 
 result = scrape_saved_list("https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18")
+place = scrape_place("https://www.google.com/maps/place/Den/@35.6731762,139.7127216,17z")
 
 print(result.list_id)
 print(result.resolved_url)
 print(result.title)
 print(result.to_dict())
+print(place.review_count)
 ```
 
 Public top-level imports intended for consumers:
 
 - `scrape_saved_list`
+- `scrape_place`
 - `parse_saved_list_artifacts`
 - `SavedList`
 - `Place`
+- `PlaceDetails`
 - `ParseError`
 - `ScrapeError`
 
@@ -138,14 +136,19 @@ The scraper returns a `SavedList` object. `to_dict()` produces JSON like this:
 }
 ```
 
-`source_url` preserves the caller's input URL. `resolved_url` captures the final browser
-URL after redirects, which is useful for short `maps.app.goo.gl` links.
+`source_url` preserves the caller's input URL. `resolved_url` captures the final URL
+after redirects, which is useful for short `maps.app.goo.gl` links.
+
+For place pages, the scraper returns a `PlaceDetails` object with fields such as
+`name`, `category`, `rating`, `review_count`, `address`, `status`, `website`,
+`phone`, `plus_code`, and coordinates when available.
 
 ## Behavior Notes
 
-- The scraper is designed for Google Maps saved-list URLs.
-- It uses a real browser session because Google Maps does not expose the required data
-  reliably to simple HTTP clients.
+- Saved lists default to `curl_cffi` against Google Maps' preloaded XSSI endpoints.
+- Place pages currently use the browser path and extract review metadata from the
+  rendered DOM.
+- Browser automation remains available for debugging, consent flows, and fallback.
 - Parsing is defensive and tolerates partial metadata, but Google can change its runtime
   schema at any time.
 - The parser prefers the explicit placelist ID from the resolved URL when available.
