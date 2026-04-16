@@ -12,6 +12,7 @@ from gmaps_scraper.place_scraper import scrape_place
 from gmaps_scraper.scraper import (
     DEFAULT_COLLECTION_MODE,
     BrowserSessionConfig,
+    HttpSessionConfig,
     collect_saved_list_result,
 )
 from gmaps_scraper.url_tools import extract_list_id
@@ -41,13 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout-ms",
         type=int,
         default=30_000,
-        help="Navigation timeout in milliseconds.",
+        help="Overall fetch timeout in milliseconds.",
     )
     parser.add_argument(
         "--settle-ms",
         type=int,
         default=3_000,
-        help="Extra wait time after the page loads.",
+        help="Extra browser-only wait time after the page loads.",
     )
     parser.add_argument(
         "--fetch-mode",
@@ -68,10 +69,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--proxy",
         default=os.environ.get("GMAPS_SCRAPER_PROXY"),
         help=(
-            "Proxy URL passed through to the browser. Prefer "
+            "Proxy URL passed through to curl_cffi and the browser. Prefer "
             "GMAPS_SCRAPER_PROXY for authenticated proxies so credentials "
             "do not appear in shell history or process listings."
         ),
+    )
+    parser.add_argument(
+        "--http-cookie-jar",
+        type=Path,
+        help="Persist curl_cffi cookies in this Netscape-format cookie jar file.",
     )
     parser.add_argument(
         "--debug-output-dir",
@@ -102,6 +108,12 @@ def main() -> int:
             profile_dir=args.session_dir,
             proxy=args.proxy,
         )
+    http_session = None
+    if args.http_cookie_jar is not None or args.proxy is not None:
+        http_session = HttpSessionConfig(
+            cookie_jar_path=args.http_cookie_jar,
+            proxy=args.proxy,
+        )
 
     if args.kind == "place":
         if args.collection_mode == "curl":
@@ -117,6 +129,7 @@ def main() -> int:
             timeout_ms=args.timeout_ms,
             settle_time_ms=args.settle_ms,
             browser_session=browser_session,
+            http_session=http_session,
         )
         payload = json.dumps(place_result.to_dict(), indent=2, ensure_ascii=False)
         if args.output is not None:
@@ -132,6 +145,7 @@ def main() -> int:
         settle_time_ms=args.settle_ms,
         collection_mode=args.collection_mode,
         browser_session=browser_session,
+        http_session=http_session,
     )
     debug_output_dir = _resolve_debug_output_dir(
         list_url=args.url,

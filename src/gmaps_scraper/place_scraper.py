@@ -12,14 +12,17 @@ from gmaps_scraper.models import PlaceDetails
 from gmaps_scraper.scraper import (
     _HTTP_IMPERSONATE,
     BrowserSessionConfig,
+    HttpSessionConfig,
     ScrapeError,
     _extract_preloaded_fetch_url,
     _handle_google_consent,
     _import_curl_requests,
     _launch_browser_context,
+    _load_http_cookie_jar,
     _normalize_response_url,
     _raise_for_status,
     _response_text,
+    _save_http_cookie_jar,
 )
 
 _TITLE_SELECTORS = ("h1.DUwDvf", "h1.lfPIob", "div[role='main'] h1")
@@ -263,6 +266,7 @@ def scrape_place(
     timeout_ms: int = 30_000,
     settle_time_ms: int = 3_000,
     browser_session: BrowserSessionConfig | None = None,
+    http_session: HttpSessionConfig | None = None,
 ) -> PlaceDetails:
     """Scrape a Google Maps place page using a browser session."""
     snapshot = collect_place_snapshot(
@@ -271,6 +275,7 @@ def scrape_place(
         timeout_ms=timeout_ms,
         settle_time_ms=settle_time_ms,
         browser_session=browser_session,
+        http_session=http_session,
     )
     resolved_url = _normalize_response_url(snapshot.get("resolved_url"))
     dom_snapshot = cast(Mapping[str, object], snapshot["dom"])
@@ -293,6 +298,7 @@ def collect_place_snapshot(
     timeout_ms: int,
     settle_time_ms: int,
     browser_session: BrowserSessionConfig | None = None,
+    http_session: HttpSessionConfig | None = None,
 ) -> dict[str, object]:
     """Collect a normalized DOM snapshot for a Google Maps place page."""
     context = _launch_browser_context(
@@ -321,6 +327,7 @@ def collect_place_snapshot(
             place_url,
             resolved_url=resolved_url,
             timeout_ms=timeout_ms,
+            http_session=http_session,
         )
     except Exception as exc:  # pragma: no cover - browser error path
         raise ScrapeError(f"Failed to scrape place page: {exc}") from exc
@@ -464,18 +471,25 @@ def _collect_preview_place_enrichment(
     *,
     resolved_url: str | None,
     timeout_ms: int,
+    http_session: HttpSessionConfig | None = None,
 ) -> dict[str, object]:
     curl_requests = _import_curl_requests()
     timeout_seconds = max(timeout_ms / 1_000, 1.0)
     base_url = resolved_url or place_url
+    session_kwargs: dict[str, object] = {
+        "impersonate": _HTTP_IMPERSONATE,
+        "allow_redirects": True,
+        "default_headers": True,
+        "timeout": timeout_seconds,
+    }
+    cookie_jar = _load_http_cookie_jar(http_session)
+    if cookie_jar is not None:
+        session_kwargs["cookies"] = cookie_jar
+    if http_session is not None and http_session.proxy is not None:
+        session_kwargs["proxy"] = http_session.proxy
 
     try:
-        with curl_requests.Session(
-            impersonate=_HTTP_IMPERSONATE,
-            allow_redirects=True,
-            default_headers=True,
-            timeout=timeout_seconds,
-        ) as session:
+        with curl_requests.Session(**session_kwargs) as session:
             page_response = session.get(base_url)
             _raise_for_status(page_response)
             page_html = _response_text(page_response)
@@ -487,6 +501,8 @@ def _collect_preview_place_enrichment(
             payload_text = _response_text(preload_response)
     except Exception:
         return {}
+    finally:
+        _save_http_cookie_jar(http_session, cookie_jar)
 
     return _extract_preview_place_enrichment(payload_text)
 

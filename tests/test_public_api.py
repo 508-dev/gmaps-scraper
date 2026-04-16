@@ -5,6 +5,7 @@ import unittest
 from gmaps_scraper import (
     BrowserProxyConfig,
     BrowserSessionConfig,
+    HttpSessionConfig,
     ParseError,
     Place,
     PlaceDetails,
@@ -21,6 +22,7 @@ class PublicApiTests(unittest.TestCase):
         self.assertTrue(callable(scrape_place))
         self.assertEqual(BrowserSessionConfig.__name__, "BrowserSessionConfig")
         self.assertEqual(BrowserProxyConfig.__name__, "BrowserProxyConfig")
+        self.assertEqual(HttpSessionConfig.__name__, "HttpSessionConfig")
         self.assertTrue(issubclass(ParseError, RuntimeError))
         self.assertTrue(issubclass(ScrapeError, RuntimeError))
 

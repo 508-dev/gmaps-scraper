@@ -80,10 +80,11 @@ Available CLI options:
 - `--output PATH` writes the JSON result to a file
 - `--headed` runs the browser in headed mode
 - `--fetch-mode {auto,curl,browser}` selects the transport path
-- `--session-dir PATH` reuses a persistent browser profile
-- `--proxy URL` sends browser traffic through a proxy
-- `--timeout-ms INTEGER` controls the navigation timeout
-- `--settle-ms INTEGER` adds extra wait time after the page loads
+- `--session-dir PATH` reuses a persistent browser profile for browser fetches
+- `--http-cookie-jar PATH` persists curl cookies across fetches
+- `--proxy URL` sends curl and browser traffic through a proxy
+- `--timeout-ms INTEGER` controls the overall fetch timeout
+- `--settle-ms INTEGER` adds extra browser-only wait time after the page loads
 
 ## Library Usage
 
@@ -92,12 +93,20 @@ Import the package directly in application code:
 ```python
 from pathlib import Path
 
-from gmaps_scraper import BrowserSessionConfig, scrape_place, scrape_saved_list
+from gmaps_scraper import (
+    BrowserSessionConfig,
+    HttpSessionConfig,
+    scrape_place,
+    scrape_saved_list,
+)
 
 result = scrape_saved_list(
     "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
     browser_session=BrowserSessionConfig(
         profile_dir=Path(".gmaps-scraper/session"),
+    ),
+    http_session=HttpSessionConfig(
+        cookie_jar_path=Path(".gmaps-scraper/http-cookies.txt"),
     ),
 )
 place = scrape_place("https://www.google.com/maps/place/Den/@35.6731762,139.7127216,17z")
@@ -113,6 +122,7 @@ Public top-level imports intended for consumers:
 
 - `BrowserProxyConfig`
 - `BrowserSessionConfig`
+- `HttpSessionConfig`
 - `scrape_saved_list`
 - `scrape_place`
 - `parse_saved_list_artifacts`
@@ -157,6 +167,9 @@ For place pages, the scraper returns a `PlaceDetails` object with fields such as
 ## Behavior Notes
 
 - Saved lists default to `curl_cffi` against Google Maps' preloaded XSSI endpoints.
+- `--settle-ms` only affects browser fetches. `--timeout-ms` applies to both browser and curl.
+- Reuse `HttpSessionConfig(cookie_jar_path=...)` or `--http-cookie-jar` when you want curl
+  fetches to carry cookies across runs.
 - Place pages currently use the browser path and extract review metadata from the
   rendered DOM.
 - Browser automation remains available for debugging, consent flows, and fallback.

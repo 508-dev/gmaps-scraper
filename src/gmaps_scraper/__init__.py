@@ -6,6 +6,7 @@ from gmaps_scraper.place_scraper import scrape_place
 from gmaps_scraper.scraper import (
     BrowserProxyConfig,
     BrowserSessionConfig,
+    HttpSessionConfig,
     ScrapeError,
     scrape_saved_list,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "PLACELIST_URL_MARKER",
     "BrowserProxyConfig",
     "BrowserSessionConfig",
+    "HttpSessionConfig",
     "ParseError",
     "Place",
     "PlaceDetails",

@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from gmaps_scraper.cli import main
 from gmaps_scraper.models import PlaceDetails
-from gmaps_scraper.scraper import BrowserArtifacts, BrowserSessionConfig
+from gmaps_scraper.scraper import BrowserArtifacts, BrowserSessionConfig, HttpSessionConfig
 
 
 def _artifacts() -> BrowserArtifacts:
@@ -74,6 +74,7 @@ class CliTests(unittest.TestCase):
             settle_time_ms=3_000,
             collection_mode="auto",
             browser_session=None,
+            http_session=None,
         )
 
     def test_writes_output_file_and_forwards_cli_flags(self) -> None:
@@ -100,6 +101,8 @@ class CliTests(unittest.TestCase):
                         str(Path(tmp_dir) / "session"),
                         "--proxy",
                         "http://proxy.example:8080",
+                        "--http-cookie-jar",
+                        str(Path(tmp_dir) / "cookies.txt"),
                     ],
                 ),
                 patch(
@@ -122,6 +125,10 @@ class CliTests(unittest.TestCase):
                 collection_mode="auto",
                 browser_session=BrowserSessionConfig(
                     profile_dir=Path(tmp_dir) / "session",
+                    proxy="http://proxy.example:8080",
+                ),
+                http_session=HttpSessionConfig(
+                    cookie_jar_path=Path(tmp_dir) / "cookies.txt",
                     proxy="http://proxy.example:8080",
                 ),
             )
@@ -159,6 +166,7 @@ class CliTests(unittest.TestCase):
             settle_time_ms=3_000,
             collection_mode="browser",
             browser_session=None,
+            http_session=None,
         )
 
     def test_place_kind_calls_place_scraper(self) -> None:
@@ -205,6 +213,7 @@ class CliTests(unittest.TestCase):
             timeout_ms=30_000,
             settle_time_ms=3_000,
             browser_session=None,
+            http_session=None,
         )
         collect_saved_list_result.assert_not_called()
 
@@ -238,6 +247,53 @@ class CliTests(unittest.TestCase):
             browser_session=BrowserSessionConfig(
                 profile_dir=None,
                 proxy="http://proxy.example:8080",
+            ),
+            http_session=HttpSessionConfig(
+                cookie_jar_path=None,
+                proxy="http://proxy.example:8080",
+            ),
+        )
+
+    def test_place_kind_forwards_http_cookie_jar_to_preview_enrichment(self) -> None:
+        stdout = io.StringIO()
+        details = PlaceDetails(
+            source_url="https://www.google.com/maps/place/Den",
+            resolved_url="https://www.google.com/maps/place/Den/@35.6731762,139.7127216,17z",
+            name="Den",
+            category="Japanese restaurant",
+            rating=4.4,
+            review_count=324,
+            address="Japan, 〒150-0001 Tokyo, Shibuya, Jingumae, 2 Chome−3−18",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with (
+                patch(
+                    "sys.argv",
+                    [
+                        "gmaps-scraper",
+                        "https://www.google.com/maps/place/Den",
+                        "--kind",
+                        "place",
+                        "--http-cookie-jar",
+                        str(Path(tmp_dir) / "cookies.txt"),
+                    ],
+                ),
+                patch("gmaps_scraper.cli.scrape_place", return_value=details) as scrape_place,
+                redirect_stdout(stdout),
+            ):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        scrape_place.assert_called_once_with(
+            "https://www.google.com/maps/place/Den",
+            headless=True,
+            timeout_ms=30_000,
+            settle_time_ms=3_000,
+            browser_session=None,
+            http_session=HttpSessionConfig(
+                cookie_jar_path=Path(tmp_dir) / "cookies.txt",
+                proxy=None,
             ),
         )
 

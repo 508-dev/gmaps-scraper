@@ -6,6 +6,7 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from http.cookiejar import LoadError, MozillaCookieJar
 from pathlib import Path
 from typing import Any, Literal, Required, TypedDict
 from urllib.parse import urljoin
@@ -91,6 +92,14 @@ class BrowserSessionConfig:
     proxy: str | BrowserProxyConfig | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class HttpSessionConfig:
+    """Controls curl-based cookie persistence and network identity."""
+
+    cookie_jar_path: Path | None = None
+    proxy: str | None = None
+
+
 class ScrapeError(RuntimeError):
     """Raised when browser automation fails."""
 
@@ -103,6 +112,7 @@ def scrape_saved_list(
     settle_time_ms: int = 3_000,
     collection_mode: CollectionMode = DEFAULT_COLLECTION_MODE,
     browser_session: BrowserSessionConfig | None = None,
+    http_session: HttpSessionConfig | None = None,
 ) -> SavedList:
     """Scrape and parse a Google Maps saved list."""
     _, result = collect_saved_list_result(
@@ -112,6 +122,7 @@ def scrape_saved_list(
         settle_time_ms=settle_time_ms,
         collection_mode=collection_mode,
         browser_session=browser_session,
+        http_session=http_session,
     )
     return result
 
@@ -124,6 +135,7 @@ def collect_saved_list_result(
     settle_time_ms: int = 3_000,
     collection_mode: CollectionMode = DEFAULT_COLLECTION_MODE,
     browser_session: BrowserSessionConfig | None = None,
+    http_session: HttpSessionConfig | None = None,
 ) -> tuple[BrowserArtifacts, SavedList]:
     """Collect artifacts and parse a Google Maps saved list."""
     normalized_mode = _normalize_collection_mode(collection_mode)
@@ -145,6 +157,7 @@ def collect_saved_list_result(
         artifacts = collect_http_artifacts(
             list_url,
             timeout_ms=timeout_ms,
+            http_session=http_session,
         )
         return artifacts, _parse_saved_list(
             list_url,
@@ -155,6 +168,7 @@ def collect_saved_list_result(
         artifacts = collect_http_artifacts(
             list_url,
             timeout_ms=timeout_ms,
+            http_session=http_session,
         )
         return artifacts, _parse_saved_list(
             list_url,
@@ -192,18 +206,25 @@ def collect_http_artifacts(
     list_url: str,
     *,
     timeout_ms: int,
+    http_session: HttpSessionConfig | None = None,
 ) -> BrowserArtifacts:
     """Load a page over HTTP and collect runtime artifacts from preload responses."""
     curl_requests = _import_curl_requests()
     timeout_seconds = max(timeout_ms / 1_000, 1.0)
+    session_kwargs: dict[str, Any] = {
+        "impersonate": _HTTP_IMPERSONATE,
+        "allow_redirects": True,
+        "default_headers": True,
+        "timeout": timeout_seconds,
+    }
+    cookie_jar = _load_http_cookie_jar(http_session)
+    if cookie_jar is not None:
+        session_kwargs["cookies"] = cookie_jar
+    if http_session is not None and http_session.proxy is not None:
+        session_kwargs["proxy"] = http_session.proxy
 
     try:
-        with curl_requests.Session(
-            impersonate=_HTTP_IMPERSONATE,
-            allow_redirects=True,
-            default_headers=True,
-            timeout=timeout_seconds,
-        ) as session:
+        with curl_requests.Session(**session_kwargs) as session:
             response = session.get(list_url)
             _raise_for_status(response)
             resolved_url = _normalize_response_url(getattr(response, "url", None))
@@ -228,6 +249,8 @@ def collect_http_artifacts(
                         script_texts.append(preload_text)
     except Exception as exc:  # pragma: no cover - network error path
         raise ScrapeError(f"Failed to collect HTTP artifacts: {exc}") from exc
+    finally:
+        _save_http_cookie_jar(http_session, cookie_jar)
 
     return BrowserArtifacts(
         resolved_url=resolved_url,
@@ -483,6 +506,36 @@ def _import_curl_requests() -> Any:
     except ImportError as exc:  # pragma: no cover - dependency error path
         raise ScrapeError("curl_cffi is not installed. Run `uv sync`.") from exc
     return curl_requests
+
+
+def _load_http_cookie_jar(
+    http_session: HttpSessionConfig | None,
+) -> MozillaCookieJar | None:
+    if http_session is None or http_session.cookie_jar_path is None:
+        return None
+    http_session.cookie_jar_path.parent.mkdir(parents=True, exist_ok=True)
+    cookie_jar = MozillaCookieJar(str(http_session.cookie_jar_path))
+    if http_session.cookie_jar_path.exists():
+        try:
+            cookie_jar.load(ignore_discard=True, ignore_expires=True)
+        except LoadError as exc:
+            raise ScrapeError(
+                f"Failed to load HTTP cookie jar: {http_session.cookie_jar_path}"
+            ) from exc
+    return cookie_jar
+
+
+def _save_http_cookie_jar(
+    http_session: HttpSessionConfig | None,
+    cookie_jar: MozillaCookieJar | None,
+) -> None:
+    if (
+        http_session is None
+        or http_session.cookie_jar_path is None
+        or cookie_jar is None
+    ):
+        return
+    cookie_jar.save(ignore_discard=True, ignore_expires=True)
 
 
 def _extract_script_texts_from_html(page_html: str) -> list[str]:
