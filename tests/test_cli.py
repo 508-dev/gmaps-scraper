@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from google_saved_lists.cli import main
-from google_saved_lists.scraper import BrowserArtifacts
+from google_saved_lists.scraper import BrowserArtifacts, BrowserSessionConfig
 
 
 def _artifacts() -> BrowserArtifacts:
@@ -67,6 +67,7 @@ class CliTests(unittest.TestCase):
             headless=True,
             timeout_ms=30_000,
             settle_time_ms=3_000,
+            browser_session=None,
         )
         parse_saved_list.assert_called_once_with(
             "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
@@ -95,6 +96,10 @@ class CliTests(unittest.TestCase):
                         "45000",
                         "--settle-ms",
                         "5000",
+                        "--session-dir",
+                        str(Path(tmp_dir) / "session"),
+                        "--proxy",
+                        "http://proxy.example:8080",
                     ],
                 ),
                 patch(
@@ -117,6 +122,10 @@ class CliTests(unittest.TestCase):
                 headless=False,
                 timeout_ms=45_000,
                 settle_time_ms=5_000,
+                browser_session=BrowserSessionConfig(
+                    profile_dir=Path(tmp_dir) / "session",
+                    proxy="http://proxy.example:8080",
+                ),
             )
             parse_saved_list.assert_called_once_with(
                 "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Required, TypedDict
 
 from google_saved_lists.models import SavedList
 from google_saved_lists.parser import JSONValue, parse_saved_list_artifacts
@@ -59,6 +59,23 @@ class BrowserArtifacts:
     html: str
 
 
+class BrowserProxyConfig(TypedDict, total=False):
+    """Playwright-compatible proxy configuration."""
+
+    server: Required[str]
+    bypass: str
+    username: str
+    password: str
+
+
+@dataclass(slots=True, frozen=True)
+class BrowserSessionConfig:
+    """Controls browser profile reuse and network identity."""
+
+    profile_dir: Path | None = None
+    proxy: str | BrowserProxyConfig | None = None
+
+
 class ScrapeError(RuntimeError):
     """Raised when browser automation fails."""
 
@@ -69,6 +86,7 @@ def scrape_saved_list(
     headless: bool = True,
     timeout_ms: int = 30_000,
     settle_time_ms: int = 3_000,
+    browser_session: BrowserSessionConfig | None = None,
 ) -> SavedList:
     """Scrape and parse a Google Maps saved list."""
     artifacts = collect_browser_artifacts(
@@ -76,6 +94,7 @@ def scrape_saved_list(
         headless=headless,
         timeout_ms=timeout_ms,
         settle_time_ms=settle_time_ms,
+        browser_session=browser_session,
     )
     return parse_saved_list_artifacts(
         list_url,
@@ -92,16 +111,15 @@ def collect_browser_artifacts(
     headless: bool,
     timeout_ms: int,
     settle_time_ms: int,
+    browser_session: BrowserSessionConfig | None = None,
 ) -> BrowserArtifacts:
     """Load a page in CloakBrowser and collect runtime artifacts."""
+    context = _launch_browser_context(
+        headless=headless,
+        browser_session=browser_session,
+    )
     try:
-        from cloakbrowser import launch  # type: ignore[import-untyped]
-    except ImportError as exc:  # pragma: no cover - dependency error path
-        raise ScrapeError("CloakBrowser is not installed. Run `uv sync`.") from exc
-
-    browser = launch(headless=headless, humanize=True)
-    try:
-        page = browser.new_page()
+        page = context.new_page()
         page.goto(list_url, wait_until="domcontentloaded", timeout=timeout_ms)
         _handle_google_consent(page, timeout_ms=timeout_ms)
         try:
@@ -118,7 +136,7 @@ def collect_browser_artifacts(
     except Exception as exc:  # pragma: no cover - browser error path
         raise ScrapeError(f"Failed to collect browser artifacts: {exc}") from exc
     finally:
-        browser.close()
+        context.close()
 
     return BrowserArtifacts(
         resolved_url=resolved_url,
@@ -126,6 +144,32 @@ def collect_browser_artifacts(
         script_texts=script_texts,
         html=html,
     )
+
+
+def _launch_browser_context(
+    *,
+    headless: bool,
+    browser_session: BrowserSessionConfig | None,
+) -> Any:
+    try:
+        from cloakbrowser import (  # type: ignore[import-untyped]
+            launch_context,
+            launch_persistent_context,
+        )
+    except ImportError as exc:  # pragma: no cover - dependency error path
+        raise ScrapeError("CloakBrowser is not installed. Run `uv sync`.") from exc
+
+    launch_kwargs: dict[str, Any] = {
+        "headless": headless,
+        "humanize": True,
+    }
+    if browser_session is not None and browser_session.proxy is not None:
+        launch_kwargs["proxy"] = browser_session.proxy
+    if browser_session is None or browser_session.profile_dir is None:
+        return launch_context(**launch_kwargs)
+
+    browser_session.profile_dir.mkdir(parents=True, exist_ok=True)
+    return launch_persistent_context(browser_session.profile_dir, **launch_kwargs)
 
 
 def _read_resolved_url(page: Any) -> str | None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from google_saved_lists.debug_dump import write_debug_dump
 from google_saved_lists.parser import parse_saved_list_artifacts
-from google_saved_lists.scraper import collect_browser_artifacts
+from google_saved_lists.scraper import BrowserSessionConfig, collect_browser_artifacts
 from google_saved_lists.url_tools import extract_list_id
 
 _DEFAULT_DEBUG_DIR_NAME = ".google-saved-lists-debug"
@@ -40,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra wait time after the page loads.",
     )
     parser.add_argument(
+        "--session-dir",
+        type=Path,
+        help="Reuse a persistent browser profile stored in this directory.",
+    )
+    parser.add_argument(
+        "--proxy",
+        help="Proxy URL passed through to the browser, for example http://user:pass@host:port.",
+    )
+    parser.add_argument(
         "--debug-output-dir",
         type=Path,
         help=(
@@ -63,11 +72,19 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    browser_session = None
+    if args.session_dir is not None or args.proxy is not None:
+        browser_session = BrowserSessionConfig(
+            profile_dir=args.session_dir,
+            proxy=args.proxy,
+        )
+
     artifacts = collect_browser_artifacts(
         args.url,
         headless=not args.show_browser_window,
         timeout_ms=args.timeout_ms,
         settle_time_ms=args.settle_ms,
+        browser_session=browser_session,
     )
     debug_output_dir = _resolve_debug_output_dir(
         list_url=args.url,

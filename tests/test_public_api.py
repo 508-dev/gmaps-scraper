@@ -2,12 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from google_saved_lists import ParseError, Place, SavedList, ScrapeError, scrape_saved_list
+from google_saved_lists import (
+    BrowserProxyConfig,
+    BrowserSessionConfig,
+    ParseError,
+    Place,
+    SavedList,
+    ScrapeError,
+    scrape_saved_list,
+)
 
 
 class PublicApiTests(unittest.TestCase):
     def test_top_level_exports_are_importable(self) -> None:
         self.assertTrue(callable(scrape_saved_list))
+        self.assertEqual(BrowserSessionConfig.__name__, "BrowserSessionConfig")
+        self.assertEqual(BrowserProxyConfig.__name__, "BrowserProxyConfig")
         self.assertTrue(issubclass(ParseError, RuntimeError))
         self.assertTrue(issubclass(ScrapeError, RuntimeError))
 
