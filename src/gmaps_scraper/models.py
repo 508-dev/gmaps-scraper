@@ -83,6 +83,8 @@ class PlaceDetails:
     lat: float | None = None
     lng: float | None = None
     limited_view: bool = False
+    main_photo_url: str | None = None
+    photo_url: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Convert place details into a JSON-serializable dictionary."""
@@ -100,6 +102,8 @@ class PlaceDetails:
             "phone": self.phone,
             "plus_code": self.plus_code,
             "description": self.description,
+            "main_photo_url": self.main_photo_url,
+            "photo_url": self.photo_url,
             "secondary_name": self.secondary_name,
             "lat": self.lat,
             "lng": self.lng,
