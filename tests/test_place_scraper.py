@@ -111,7 +111,9 @@ class PlaceScraperTests(unittest.TestCase):
     def test_clean_name_text_preserves_names_that_start_with_open_or_closed(self) -> None:
         self.assertEqual(_clean_name_text("Open Kitchen"), "Open Kitchen")
         self.assertEqual(_clean_name_text("Closed Loop Coffee"), "Closed Loop Coffee")
+        self.assertEqual(_clean_name_text("Open Now Cafe"), "Open Now Cafe")
         self.assertIsNone(_clean_name_text("Open ⋅ Closes 8 PM"))
+        self.assertIsNone(_clean_name_text("Open now"))
 
     def test_clean_category_text_rejects_search_result_labels(self) -> None:
         self.assertIsNone(_clean_category_text("share"))
@@ -273,6 +275,16 @@ class PlaceScraperTests(unittest.TestCase):
             "Open fire cooking over binchotan.",
         )
 
+    def test_extract_preview_description_preserves_open_now_prose(self) -> None:
+        description = _extract_preview_description(
+            [
+                "Open now for lunch and dinner service.",
+                "Open now ⋅ Closes 10 PM",
+            ]
+        )
+
+        self.assertEqual(description, "Open now for lunch and dinner service.")
+
     def test_extract_preview_coordinates_ignores_short_integer_pairs(self) -> None:
         root = [
             [1, 2],
@@ -342,6 +354,30 @@ class PlaceScraperTests(unittest.TestCase):
         )
 
         self.assertIsNone(details.name)
+
+    def test_build_place_details_preserves_numeric_only_name(self) -> None:
+        details = _build_place_details(
+            "https://www.google.com/maps/place/404",
+            resolved_url="https://www.google.com/maps/place/404",
+            snapshot={
+                "name": "404",
+                "body_text": "\n".join(["404", "Bar"]),
+            },
+        )
+
+        self.assertEqual(details.name, "404")
+
+    def test_build_place_details_preserves_slashed_numeric_name(self) -> None:
+        details = _build_place_details(
+            "https://www.google.com/maps/place/24-7",
+            resolved_url="https://www.google.com/maps/place/24-7",
+            snapshot={
+                "name": "24/7",
+                "body_text": "\n".join(["24/7", "Diner"]),
+            },
+        )
+
+        self.assertEqual(details.name, "24/7")
 
     def test_build_place_details_preserves_open_prefixed_name_and_description(self) -> None:
         details = _build_place_details(

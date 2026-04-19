@@ -63,7 +63,8 @@ _STATUS_LINE_PATTERN = re.compile(
     r"^(?:"
     r"(?:temporarily|permanently)\s+closed\b"
     r"|(?:opens|closes)\b"
-    r"|(?:open|closed)\s+(?:now\b|24\s*hours\b)"
+    r"|(?:open|closed)\s+now(?:\s*$|\s*(?:[·⋅]|[-–—])\s*(?:opens?|closes?)\b)"
+    r"|(?:open|closed)\s+24\s*hours\b"
     r"|(?:open|closed)\s*(?:[·⋅]|[-–—])\s*(?:opens?|closes?)\b"
     r")",
     re.IGNORECASE,
@@ -663,8 +664,7 @@ def _clean_name_text(value: object) -> str | None:
         return None
     if _looks_like_search_results_label(normalized):
         return None
-    has_rating = _parse_rating(normalized) is not None
-    if has_rating and not any(character.isalpha() for character in normalized):
+    if _looks_like_rating_text(normalized):
         return None
     if "·" in normalized and any(character.isdigit() for character in normalized):
         return None
@@ -1069,6 +1069,14 @@ def _parse_rating(value: object) -> float | None:
         return float(match.group(1).replace(",", "."))
     except ValueError:
         return None
+
+
+def _looks_like_rating_text(value: str) -> bool:
+    stripped = value.strip()
+    if re.fullmatch(r"[0-9]+(?:[.,][0-9]+)?", stripped):
+        rating = _parse_rating(stripped)
+        return rating is not None and 0 <= rating <= 5
+    return re.fullmatch(r"[0-9]+(?:[.,][0-9]+)?\s*\([0-9,]+\)", stripped) is not None
 
 
 def _parse_review_count(value: object) -> int | None:
