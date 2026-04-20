@@ -8,20 +8,20 @@ from gmaps_scraper.parser import ParseError, parse_saved_list_artifacts
 
 _LIST_URL = (
     "https://www.google.com/maps/@35.6501307,139.6868459,15z/"
-    "data=!4m3!11m2!2sUGEPbA20Qd-OH4uoWjmDgQ!3e3"
+    "data=!4m3!11m2!2sTESTLISTABC123456789!3e3"
 )
-_SHORT_URL = "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18"
+_SHORT_URL = "https://maps.app.goo.gl/TestSavedListShortUrl"
 _REDIRECT_URL = (
     "https://www.google.com/maps/@30.5370705,125.4120472,6z/"
-    "data=!4m3!11m2!2sUGEPbA20Qd-OH4uoWjmDgQ!3e3?entry=ttu"
+    "data=!4m3!11m2!2sTESTLISTABC123456789!3e3?entry=ttu"
 )
 _LIST_NODE = [
-    ["UGEPbA20Qd-OH4uoWjmDgQ", 1, None, 1, 1],
+    ["TESTLISTABC123456789", 1, None, 1, 1],
     4,
-    "https://www.google.com/maps/placelists/list/UGEPbA20Qd-OH4uoWjmDgQ",
+    "https://www.google.com/maps/placelists/list/TESTLISTABC123456789",
     "Owner",
-    "Tokyo Dinners",
-    "Best spots in the city",
+    "Sample Coffee Stops",
+    "Curated fixture data for parser tests",
     None,
     None,
     [
@@ -32,13 +32,13 @@ _LIST_NODE = [
                 None,
                 "",
                 None,
-                "Shibuya, Tokyo",
+                "Example District",
                 [None, None, 35.6501307, 139.6868459],
                 ["7451636382641713350", "aux"],
-                "/g/11yakumo",
+                "/g/11northwind",
             ],
-            "Yakumo",
-            "Delicious wonton ramen. You can ask for a mix of white and dark broth.",
+            "Northwind Cafe",
+            "Try the seasonal sampler.",
             None,
             None,
             None,
@@ -51,12 +51,12 @@ _LIST_NODE = [
                 None,
                 "",
                 None,
-                "Chuo City, Tokyo",
+                "Market Square",
                 [None, None, 35.6915776, 139.7836109],
                 ["1234567890123456789"],
-                "/g/11sushi",
+                "/g/11harborbakery",
             ],
-            "Sushi Place",
+            "Harbor Bakery",
         ],
     ],
 ]
@@ -68,21 +68,21 @@ class ParserTests(unittest.TestCase):
 
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
 
-        self.assertEqual(parsed.list_id, "UGEPbA20Qd-OH4uoWjmDgQ")
-        self.assertEqual(parsed.title, "Tokyo Dinners")
-        self.assertEqual(parsed.description, "Best spots in the city")
+        self.assertEqual(parsed.list_id, "TESTLISTABC123456789")
+        self.assertEqual(parsed.title, "Sample Coffee Stops")
+        self.assertEqual(parsed.description, "Curated fixture data for parser tests")
         self.assertEqual(len(parsed.places), 2)
-        self.assertEqual(parsed.places[0].name, "Yakumo")
+        self.assertEqual(parsed.places[0].name, "Northwind Cafe")
         self.assertEqual(
             parsed.places[0].note,
-            "Delicious wonton ramen. You can ask for a mix of white and dark broth.",
+            "Try the seasonal sampler.",
         )
         self.assertTrue(parsed.places[0].is_favorite)
         self.assertFalse(parsed.places[1].is_favorite)
         self.assertEqual(parsed.places[0].cid, "7451636382641713350")
         self.assertEqual(
             parsed.places[0].maps_url,
-            "https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo",
+            "https://www.google.com/maps/search/?api=1&query=Northwind+Cafe%2C+Example+District",
         )
 
     def test_falls_back_to_placelist_marker_without_list_id(self) -> None:
@@ -93,9 +93,9 @@ class ParserTests(unittest.TestCase):
             runtime_state=runtime_state,
         )
 
-        self.assertEqual(parsed.list_id, "UGEPbA20Qd-OH4uoWjmDgQ")
-        self.assertEqual(parsed.title, "Tokyo Dinners")
-        self.assertEqual(parsed.places[1].name, "Sushi Place")
+        self.assertEqual(parsed.list_id, "TESTLISTABC123456789")
+        self.assertEqual(parsed.title, "Sample Coffee Stops")
+        self.assertEqual(parsed.places[1].name, "Harbor Bakery")
         self.assertFalse(parsed.places[1].is_favorite)
 
     def test_prefers_list_id_from_resolved_redirect_url(self) -> None:
@@ -109,8 +109,8 @@ class ParserTests(unittest.TestCase):
 
         self.assertEqual(parsed.source_url, _SHORT_URL)
         self.assertEqual(parsed.resolved_url, _REDIRECT_URL)
-        self.assertEqual(parsed.list_id, "UGEPbA20Qd-OH4uoWjmDgQ")
-        self.assertEqual(parsed.title, "Tokyo Dinners")
+        self.assertEqual(parsed.list_id, "TESTLISTABC123456789")
+        self.assertEqual(parsed.title, "Sample Coffee Stops")
 
     def test_decodes_embedded_xssi_blob(self) -> None:
         blob = ")]}'\\n" + json.dumps(_LIST_NODE)
@@ -118,7 +118,7 @@ class ParserTests(unittest.TestCase):
         parsed = parse_saved_list_artifacts(_LIST_URL, script_texts=[blob])
 
         self.assertEqual(parsed.resolved_url, None)
-        self.assertEqual(parsed.title, "Tokyo Dinners")
+        self.assertEqual(parsed.title, "Sample Coffee Stops")
         self.assertEqual(len(parsed.places), 2)
 
     def test_decodes_app_initialization_state_assignment(self) -> None:
@@ -126,8 +126,8 @@ class ParserTests(unittest.TestCase):
 
         parsed = parse_saved_list_artifacts(_LIST_URL, script_texts=[blob])
 
-        self.assertEqual(parsed.list_id, "UGEPbA20Qd-OH4uoWjmDgQ")
-        self.assertEqual(parsed.title, "Tokyo Dinners")
+        self.assertEqual(parsed.list_id, "TESTLISTABC123456789")
+        self.assertEqual(parsed.title, "Sample Coffee Stops")
 
     def test_builds_search_query_url_when_cid_is_missing(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
@@ -138,10 +138,10 @@ class ParserTests(unittest.TestCase):
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
 
         self.assertEqual(parsed.places[0].cid, None)
-        self.assertEqual(parsed.places[0].google_id, "/g/11yakumo")
+        self.assertEqual(parsed.places[0].google_id, "/g/11northwind")
         self.assertEqual(
             parsed.places[0].maps_url,
-            "https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo",
+            "https://www.google.com/maps/search/?api=1&query=Northwind+Cafe%2C+Example+District",
         )
 
     def test_builds_coordinate_query_url_only_when_no_name_or_address_exist(self) -> None:
@@ -246,19 +246,19 @@ class ParserTests(unittest.TestCase):
         self.assertNotEqual(parsed.places[1].cid, "104356373423434804635")
         self.assertEqual(
             parsed.places[0].maps_url,
-            "https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo",
+            "https://www.google.com/maps/search/?api=1&query=Northwind+Cafe%2C+Example+District",
         )
 
     def test_extracts_favorite_and_note_from_user_payload_shape(self) -> None:
         runtime_state = [
             "noise",
             [
-                ["UGEPbA20Qd-OH4uoWjmDgQ", 1, None, 1, 1],
+                ["TESTLISTABC123456789", 1, None, 1, 1],
                 4,
-                "https://www.google.com/maps/placelists/list/UGEPbA20Qd-OH4uoWjmDgQ",
+                "https://www.google.com/maps/placelists/list/TESTLISTABC123456789",
                 "Owner",
-                "Tokyo Dinners",
-                "Best spots in the city",
+                "Sample Coffee Stops",
+                "Curated fixture data for parser tests",
                 None,
                 None,
                 [
@@ -270,15 +270,14 @@ class ParserTests(unittest.TestCase):
                             "",
                             None,
                             (
-                                "Japan, 〒153-0051 Tokyo, Meguro City, Kamimeguro, "
-                                "2 Chome−12−2 W.nakameguro 1F"
+                                "100 Example Ave, Suite 1"
                             ),
                             [None, None, 35.6426886, 139.6988208],
                             ["6924437575605096209", "-782808945063765017"],
                             "/g/1pty5xgj1",
                         ],
-                        "MARU",
-                        "Foie gras, caviar and truffle oyakodon!",
+                        "Fixture Bistro",
+                        "Try the tasting menu.",
                         None,
                         None,
                         None,
@@ -295,10 +294,10 @@ class ParserTests(unittest.TestCase):
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
 
         self.assertEqual(len(parsed.places), 1)
-        self.assertEqual(parsed.places[0].name, "MARU")
+        self.assertEqual(parsed.places[0].name, "Fixture Bistro")
         self.assertEqual(
             parsed.places[0].note,
-            "Foie gras, caviar and truffle oyakodon!",
+            "Try the tasting menu.",
         )
         self.assertTrue(parsed.places[0].is_favorite)
 
@@ -306,12 +305,12 @@ class ParserTests(unittest.TestCase):
         runtime_state = [
             "noise",
             [
-                ["UGEPbA20Qd-OH4uoWjmDgQ", 1, None, 1, 1],
+                ["TESTLISTABC123456789", 1, None, 1, 1],
                 4,
-                "https://www.google.com/maps/placelists/list/UGEPbA20Qd-OH4uoWjmDgQ",
+                "https://www.google.com/maps/placelists/list/TESTLISTABC123456789",
                 "Owner",
-                "Tokyo Dinners",
-                "Best spots in the city",
+                "Sample Coffee Stops",
+                "Curated fixture data for parser tests",
                 None,
                 None,
                 [
@@ -322,7 +321,7 @@ class ParserTests(unittest.TestCase):
                             None,
                             "",
                             None,
-                            "Nakameguro, Tokyo",
+                            "123 Central Plaza",
                             [None, None, 35.6426886, 139.6988208],
                             ["6924437575605096209", "-782808945063765017"],
                             "/g/1pty5xgj1",
@@ -341,18 +340,18 @@ class ParserTests(unittest.TestCase):
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
 
         self.assertEqual(len(parsed.places), 1)
-        self.assertEqual(parsed.places[0].address, "Nakameguro, Tokyo")
+        self.assertEqual(parsed.places[0].address, "123 Central Plaza")
         self.assertTrue(parsed.places[0].is_favorite)
 
     def test_prefers_enclosing_place_name_over_metadata_string(self) -> None:
         runtime_state = [
             "noise",
             [
-                ["UGEPbA20Qd-OH4uoWjmDgQ", 1, None, 1, 1],
+                ["TESTLISTABC123456789", 1, None, 1, 1],
                 4,
-                "https://www.google.com/maps/placelists/list/UGEPbA20Qd-OH4uoWjmDgQ",
+                "https://www.google.com/maps/placelists/list/TESTLISTABC123456789",
                 "Owner",
-                "Taipei Dumplings",
+                "Sample Dumplings",
                 None,
                 None,
                 None,
@@ -363,19 +362,15 @@ class ParserTests(unittest.TestCase):
                             None,
                             None,
                             (
-                                "106, Taiwan, Taipei City, Da’an District, Section 4, "
-                                "Zhongxiao E Rd, 97號頂好紫琳蒸餃館 Zi Lin Steamed DumplingB1樓"
+                                "100 Example Ave Sample Dumpling House Suite 1"
                             ),
                             None,
-                            (
-                                "106, Taiwan, Taipei City, Da’an District, Section 4, "
-                                "Zhongxiao E Rd, 97號B1樓"
-                            ),
+                            "100 Example Ave, Suite 1",
                             [None, None, 25.0417836, 121.5479306],
                             ["3765761194353288769", "4471733103496006465"],
                             "/g/1tlcywsb",
                         ],
-                        "頂好紫琳蒸餃館 Zi Lin Steamed Dumpling",
+                        "Sample Dumpling House",
                         "",
                         None,
                         None,
@@ -390,10 +385,10 @@ class ParserTests(unittest.TestCase):
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
 
         self.assertEqual(len(parsed.places), 1)
-        self.assertEqual(parsed.places[0].name, "頂好紫琳蒸餃館 Zi Lin Steamed Dumpling")
+        self.assertEqual(parsed.places[0].name, "Sample Dumpling House")
         self.assertEqual(
             parsed.places[0].address,
-            "106, Taiwan, Taipei City, Da’an District, Section 4, Zhongxiao E Rd, 97號B1樓",
+            "100 Example Ave, Suite 1",
         )
 
     def test_does_not_promote_list_title_into_place_name(self) -> None:
@@ -405,9 +400,8 @@ class ParserTests(unittest.TestCase):
                 "https://www.google.com/maps/placelists/list/LIST123",
                 "Owner",
                 (
-                    "Michael’s Tasmania, Australia 🇦🇺 bookmarks. "
-                    "See https://beacons.ai/demflyers for more, or follow on "
-                    "Instagram / Threads / BlueSky @demflyers"
+                    "Coastal weekend stops. See https://example.com/field-notes "
+                    "for more, or follow @sampleguide for updates"
                 ),
                 None,
                 None,
@@ -420,7 +414,7 @@ class ParserTests(unittest.TestCase):
                             None,
                             None,
                             None,
-                            "Hive Tasmania",
+                            "Harbor Studio",
                             [None, None, -41.157461399999995, 146.1758303],
                             ["104356373423434804635"],
                             None,
@@ -438,13 +432,13 @@ class ParserTests(unittest.TestCase):
         )
 
         self.assertEqual(len(parsed.places), 1)
-        self.assertEqual(parsed.places[0].name, "Hive Tasmania")
+        self.assertEqual(parsed.places[0].name, "Harbor Studio")
         self.assertEqual(parsed.places[0].address, None)
         self.assertEqual(parsed.places[0].cid, "104356373423434804635")
 
     def test_uses_structured_place_record_for_sparse_real_payload_shape(self) -> None:
         owner = [
-            "Michael Wu",
+            "List Owner",
             (
                 "https://lh3.googleusercontent.com/a-/ALV-UjW_i8-Eyr6conUhZ6tzGGlFe76mQTGeURI9N"
                 "KDlca0FzlN0GY0Kjg"
@@ -458,11 +452,10 @@ class ParserTests(unittest.TestCase):
                 4,
                 "https://www.google.com/maps/placelists/list/LIST123",
                 "Owner",
-                "Tasmania, Australia 🇦🇺",
+                "Coastal Weekenders",
                 (
-                    "Michael’s Tasmania, Australia 🇦🇺 bookmarks. "
-                    "See https://beacons.ai/demflyers for more, or follow on "
-                    "Instagram / Threads / BlueSky @demflyers"
+                    "Coastal weekend stops. See https://example.com/field-notes "
+                    "for more, or follow @sampleguide for updates"
                 ),
                 None,
                 None,
@@ -473,16 +466,16 @@ class ParserTests(unittest.TestCase):
                             None,
                             None,
                             (
-                                "The Source, Ether Building, 655 Main Rd, "
-                                "Berriedale TAS 7011, Australia"
+                                "Signal House, Pier Building, 10 Ocean Ave, "
+                                "Sample Bay CA 94000"
                             ),
                             None,
-                            "Ether Building, 655 Main Rd, Berriedale TAS 7011, Australia",
+                            "Pier Building, 10 Ocean Ave, Sample Bay CA 94000",
                             [None, None, -42.811949, 147.2614472],
                             ["-6165976776628271961", "-3752281006438109761"],
                             "/g/11g_1pnk5",
                         ],
-                        "The Source",
+                        "Signal House",
                         "",
                         None,
                         None,
@@ -505,7 +498,7 @@ class ParserTests(unittest.TestCase):
                             [None, None, -41.157461399999995, 146.1758303],
                             ["-6162110142486463501", "-7368952120126222420"],
                         ],
-                        "Hive Tasmania",
+                        "Harbor Studio",
                         "",
                         None,
                         None,
@@ -527,14 +520,14 @@ class ParserTests(unittest.TestCase):
         )
 
         self.assertEqual(len(parsed.places), 2)
-        self.assertEqual(parsed.places[0].name, "The Source")
+        self.assertEqual(parsed.places[0].name, "Signal House")
         self.assertEqual(
             parsed.places[0].address,
-            "Ether Building, 655 Main Rd, Berriedale TAS 7011, Australia",
+            "Pier Building, 10 Ocean Ave, Sample Bay CA 94000",
         )
         self.assertEqual(parsed.places[0].cid, "14694463067271441855")
         self.assertEqual(parsed.places[0].google_id, "/g/11g_1pnk5")
-        self.assertEqual(parsed.places[1].name, "Hive Tasmania")
+        self.assertEqual(parsed.places[1].name, "Harbor Studio")
         self.assertEqual(parsed.places[1].address, None)
         self.assertEqual(parsed.places[1].cid, "11077791953583329196")
         self.assertEqual(parsed.places[1].google_id, None)

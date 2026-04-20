@@ -28,51 +28,51 @@ class PublicApiTests(unittest.TestCase):
 
     def test_saved_list_serializes_library_shape(self) -> None:
         place = Place(
-            name="Yakumo",
-            address="Shibuya, Tokyo",
-            note="Delicious wonton ramen. You can ask for a mix of white and dark broth.",
+            name="Northwind Cafe",
+            address="Example District",
+            note="Try the seasonal sampler.",
             lat=35.6501307,
             lng=139.6868459,
-            maps_url="https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo",
+            maps_url=(
+                "https://www.google.com/maps/search/"
+                "?api=1&query=Northwind+Cafe%2C+Example+District"
+            ),
             is_favorite=True,
         )
         saved_list = SavedList(
-            source_url="https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+            source_url="https://maps.app.goo.gl/TestSavedListShortUrl",
             resolved_url=(
                 "https://www.google.com/maps/@30.5370705,125.4120472,6z/"
-                "data=!4m3!11m2!2sUGEPbA20Qd-OH4uoWjmDgQ!3e3?entry=ttu"
+                "data=!4m3!11m2!2sTESTLISTABC123456789!3e3?entry=ttu"
             ),
-            list_id="UGEPbA20Qd-OH4uoWjmDgQ",
-            title="Tokyo Dinners",
-            description="Best spots in the city",
+            list_id="TESTLISTABC123456789",
+            title="Sample Coffee Stops",
+            description="Curated fixture data for parser tests",
             places=[place],
         )
 
         self.assertEqual(
             saved_list.to_dict(),
             {
-                "source_url": "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                "source_url": "https://maps.app.goo.gl/TestSavedListShortUrl",
                 "resolved_url": (
                     "https://www.google.com/maps/@30.5370705,125.4120472,6z/"
-                    "data=!4m3!11m2!2sUGEPbA20Qd-OH4uoWjmDgQ!3e3?entry=ttu"
+                    "data=!4m3!11m2!2sTESTLISTABC123456789!3e3?entry=ttu"
                 ),
-                "list_id": "UGEPbA20Qd-OH4uoWjmDgQ",
-                "title": "Tokyo Dinners",
-                "description": "Best spots in the city",
+                "list_id": "TESTLISTABC123456789",
+                "title": "Sample Coffee Stops",
+                "description": "Curated fixture data for parser tests",
                 "places": [
                     {
-                        "name": "Yakumo",
-                        "address": "Shibuya, Tokyo",
-                        "note": (
-                            "Delicious wonton ramen. You can ask for a mix of white and "
-                            "dark broth."
-                        ),
+                        "name": "Northwind Cafe",
+                        "address": "Example District",
+                        "note": "Try the seasonal sampler.",
                         "is_favorite": True,
                         "lat": 35.6501307,
                         "lng": 139.6868459,
                         "maps_url": (
                             "https://www.google.com/maps/search/"
-                            "?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo"
+                            "?api=1&query=Northwind+Cafe%2C+Example+District"
                         ),
                     }
                 ],
