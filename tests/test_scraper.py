@@ -239,7 +239,7 @@ class ScraperConsentTests(unittest.TestCase):
     def test_reads_resolved_url_from_page(self) -> None:
         page = _FakeContext(
             text="",
-            url="https://www.google.com/maps/@30.5370705,125.4120472,6z/data=!4m3!11m2!2sUGEPbA20Qd-OH4uoWjmDgQ!3e3?entry=ttu",
+            url="https://www.google.com/maps/@30.5370705,125.4120472,6z/data=!4m3!11m2!2sTESTLISTABC123456789!3e3?entry=ttu",
         )
 
         self.assertEqual(_read_resolved_url(page), page.url)
