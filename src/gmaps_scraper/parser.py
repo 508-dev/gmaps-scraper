@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TypeGuard, cast
 from urllib.parse import urlencode
 
-from gmaps_scraper.models import Place, SavedList
+from gmaps_scraper.models import ListOwner, Place, SavedList
 from gmaps_scraper.url_tools import (
     extract_list_id,
     extract_list_id_from_text,
@@ -259,8 +259,8 @@ def _parse_candidate_node(
     resolved_url: str | None,
     list_id: str | None,
 ) -> SavedList:
-    title, description = _extract_metadata(node)
     places = _extract_places(node)
+    title, description, owner, collaborators = _extract_metadata(node, places=places)
     resolved_list_id = list_id or _find_list_id_in_node(node)
     return SavedList(
         source_url=list_url,
@@ -269,19 +269,44 @@ def _parse_candidate_node(
         title=title,
         description=description,
         places=places,
+        owner=owner,
+        collaborators=collaborators,
     )
 
 
-def _extract_metadata(node: JSONValue) -> tuple[str | None, str | None]:
+def _extract_metadata(
+    node: JSONValue,
+    *,
+    places: Sequence[Place],
+) -> tuple[str | None, str | None, ListOwner | None, list[ListOwner]]:
     metadata_node = _find_metadata_node(node)
     if metadata_node is None:
-        return None, None
+        owner, collaborators = _split_owner_list(_collect_place_owners(places))
+        return None, None, owner, collaborators
 
     title = _clean_text(_safe_index(metadata_node, 4))
     description = _clean_text(_safe_index(metadata_node, 5))
     if description == title:
         description = None
-    return title, description
+    owner = _parse_list_owner(_safe_index(metadata_node, 3))
+    collaborators = _merge_owner_lists(
+        _extract_additional_list_header_owners(metadata_node),
+        _collect_place_owners(places),
+    )
+    if owner is None:
+        owner, collaborators = _split_owner_list(collaborators)
+    else:
+        collaborators = _merge_owner_lists(collaborators, [])
+        collaborators = [
+            collaborator
+            for collaborator in collaborators
+            if (
+                collaborator.name,
+                collaborator.photo_url,
+                collaborator.profile_id,
+            ) != (owner.name, owner.photo_url, owner.profile_id)
+        ]
+    return title, description, owner, collaborators
 
 
 def _find_metadata_node(node: JSONValue) -> list[JSONValue] | None:
@@ -302,6 +327,80 @@ def _contains_placelist_signal(node: list[JSONValue]) -> bool:
         if has_placelist_marker(value):
             return True
     return False
+
+
+def _extract_additional_list_header_owners(node: list[JSONValue]) -> list[ListOwner]:
+    owners: list[ListOwner] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+
+    for index, value in enumerate(node):
+        if index in {3, 8}:
+            continue
+        for current, _ in _walk_json(value):
+            owner = _parse_list_owner(current)
+            if owner is None:
+                continue
+            key = (owner.name, owner.photo_url, owner.profile_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            owners.append(owner)
+
+    return owners
+
+
+def _collect_place_owners(places: Sequence[Place]) -> list[ListOwner]:
+    return _merge_owner_lists(
+        [place.added_by for place in places if place.added_by is not None],
+        [],
+    )
+
+
+def _merge_owner_lists(
+    primary: Sequence[ListOwner | None],
+    secondary: Sequence[ListOwner | None],
+) -> list[ListOwner]:
+    owners: list[ListOwner] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+
+    for owner in [*primary, *secondary]:
+        if owner is None:
+            continue
+        key = (owner.name, owner.photo_url, owner.profile_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        owners.append(owner)
+
+    return owners
+
+
+def _split_owner_list(
+    owners: Sequence[ListOwner],
+) -> tuple[ListOwner | None, list[ListOwner]]:
+    if not owners:
+        return None, []
+    return owners[0], list(owners[1:])
+
+
+def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
+    if not isinstance(node, list) or len(node) < 1:
+        return None
+
+    name = _clean_text(_safe_index(node, 0))
+    photo_url = _clean_text(_safe_index(node, 1))
+    profile_id = _clean_text(_safe_index(node, 2))
+
+    if name is None:
+        return None
+    if photo_url is not None and not photo_url.startswith(("http://", "https://")):
+        return None
+    if profile_id is not None and not _looks_like_profile_id(profile_id):
+        return None
+    if photo_url is None and profile_id is None:
+        return None
+
+    return ListOwner(name=name, photo_url=photo_url, profile_id=profile_id)
 
 
 def _extract_places(node: JSONValue) -> list[Place]:
@@ -342,6 +441,7 @@ def _extract_places(node: JSONValue) -> list[Place]:
             cid=cid,
             google_id=google_id,
             is_favorite=is_favorite,
+            added_by=_find_place_added_by(place_record),
         )
         dedupe_key = (
             google_id
@@ -423,6 +523,21 @@ def _find_place_is_favorite(
     if place_record is None:
         return False
     return _contains_favorite_marker(place_record)
+
+
+def _find_place_added_by(place_record: list[JSONValue] | None) -> ListOwner | None:
+    if place_record is None:
+        return None
+
+    preferred = _parse_list_owner(_safe_index(place_record, 12))
+    if preferred is not None:
+        return preferred
+
+    for value in reversed(place_record):
+        owner = _parse_list_owner(value)
+        if owner is not None:
+            return owner
+    return None
 
 
 def _find_place_record(
@@ -693,3 +808,7 @@ def _is_plain_text(value: str) -> bool:
 def _looks_like_cid_candidate(value: str) -> bool:
     normalized = value.removeprefix("-")
     return normalized.isdigit() and len(normalized) >= 10
+
+
+def _looks_like_profile_id(value: str) -> bool:
+    return value.isdigit() and len(value) >= 10

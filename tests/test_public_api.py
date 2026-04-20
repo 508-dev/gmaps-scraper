@@ -6,6 +6,7 @@ from gmaps_scraper import (
     BrowserProxyConfig,
     BrowserSessionConfig,
     HttpSessionConfig,
+    ListOwner,
     ParseError,
     Place,
     PlaceDetails,
@@ -23,6 +24,7 @@ class PublicApiTests(unittest.TestCase):
         self.assertEqual(BrowserSessionConfig.__name__, "BrowserSessionConfig")
         self.assertEqual(BrowserProxyConfig.__name__, "BrowserProxyConfig")
         self.assertEqual(HttpSessionConfig.__name__, "HttpSessionConfig")
+        self.assertEqual(ListOwner.__name__, "ListOwner")
         self.assertTrue(issubclass(ParseError, RuntimeError))
         self.assertTrue(issubclass(ScrapeError, RuntimeError))
 
@@ -38,6 +40,11 @@ class PublicApiTests(unittest.TestCase):
                 "?api=1&query=Northwind+Cafe%2C+Example+District"
             ),
             is_favorite=True,
+            added_by=ListOwner(
+                name="Fixture Owner",
+                photo_url="https://lh3.googleusercontent.com/a-/fixture-owner",
+                profile_id="104356373423434804635",
+            ),
         )
         saved_list = SavedList(
             source_url="https://maps.app.goo.gl/TestSavedListShortUrl",
@@ -49,6 +56,18 @@ class PublicApiTests(unittest.TestCase):
             title="Sample Coffee Stops",
             description="Curated fixture data for parser tests",
             places=[place],
+            owner=ListOwner(
+                name="Fixture Owner",
+                photo_url="https://lh3.googleusercontent.com/a-/fixture-owner",
+                profile_id="104356373423434804635",
+            ),
+            collaborators=[
+                ListOwner(
+                    name="Fixture Collaborator",
+                    photo_url="https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                    profile_id="205678901234567890123",
+                )
+            ],
         )
 
         self.assertEqual(
@@ -62,6 +81,18 @@ class PublicApiTests(unittest.TestCase):
                 "list_id": "TESTLISTABC123456789",
                 "title": "Sample Coffee Stops",
                 "description": "Curated fixture data for parser tests",
+                "owner": {
+                    "name": "Fixture Owner",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                    "profile_id": "104356373423434804635",
+                },
+                "collaborators": [
+                    {
+                        "name": "Fixture Collaborator",
+                        "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                        "profile_id": "205678901234567890123",
+                    }
+                ],
                 "places": [
                     {
                         "name": "Northwind Cafe",
@@ -74,6 +105,10 @@ class PublicApiTests(unittest.TestCase):
                             "https://www.google.com/maps/search/"
                             "?api=1&query=Northwind+Cafe%2C+Example+District"
                         ),
+                        "added_by": {
+                            "name": "Fixture Owner",
+                            "profile_id": "104356373423434804635",
+                        },
                     }
                 ],
             },

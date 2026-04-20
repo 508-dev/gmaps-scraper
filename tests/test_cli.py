@@ -35,6 +35,18 @@ def _parsed_payload() -> dict[str, object]:
         "list_id": "TESTLISTABC123456789",
         "title": "Sample Coffee Stops",
         "description": "Curated fixture data for parser tests",
+        "owner": {
+            "name": "Fixture Owner",
+            "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+            "profile_id": "104356373423434804635",
+        },
+        "collaborators": [
+            {
+                "name": "Fixture Collaborator",
+                "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                "profile_id": "205678901234567890123",
+            }
+        ],
         "places": [],
     }
 
@@ -144,7 +156,7 @@ class CliTests(unittest.TestCase):
                 "sys.argv",
                 [
                     "gmaps-scraper",
-                    "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                    "https://maps.app.goo.gl/TestSavedListShortUrl",
                     "--fetch-mode",
                     "browser",
                 ],
@@ -160,7 +172,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), parsed_payload)
         collect_saved_list_result.assert_called_once_with(
-            "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+            "https://maps.app.goo.gl/TestSavedListShortUrl",
             headless=True,
             timeout_ms=30_000,
             settle_time_ms=3_000,
@@ -307,7 +319,7 @@ class CliTests(unittest.TestCase):
                 "sys.argv",
                 [
                     "gmaps-scraper",
-                    "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                    "https://maps.app.goo.gl/TestSavedListShortUrl",
                     "--download-photo",
                     "photo.jpg",
                 ],
@@ -322,7 +334,7 @@ class CliTests(unittest.TestCase):
                 "sys.argv",
                 [
                     "gmaps-scraper",
-                    "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                    "https://maps.app.goo.gl/TestSavedListShortUrl",
                     "--download-main-photo",
                     "main-photo.jpg",
                 ],
@@ -399,7 +411,7 @@ class CliTests(unittest.TestCase):
         with (
             patch(
                 "sys.argv",
-                ["gmaps-scraper", "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18"],
+                ["gmaps-scraper", "https://maps.app.goo.gl/TestSavedListShortUrl"],
             ),
             patch.dict("os.environ", {"GMAPS_SCRAPER_PROXY": "http://proxy.example:8080"}),
             patch(
@@ -412,7 +424,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         collect_saved_list_result.assert_called_once_with(
-            "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+            "https://maps.app.goo.gl/TestSavedListShortUrl",
             headless=True,
             timeout_ms=30_000,
             settle_time_ms=3_000,
@@ -565,7 +577,7 @@ class CliTests(unittest.TestCase):
                     "sys.argv",
                     [
                         "gmaps-scraper",
-                        "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                        "https://maps.app.goo.gl/TestSavedListShortUrl",
                         "--debug-output-dir",
                         tmp_dir,
                     ],
@@ -576,7 +588,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             write_debug_dump.assert_called_once_with(
-                "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                "https://maps.app.goo.gl/TestSavedListShortUrl",
                 resolved_url=artifacts.resolved_url,
                 runtime_state=artifacts.runtime_state,
                 script_texts=artifacts.script_texts,
@@ -603,7 +615,7 @@ class CliTests(unittest.TestCase):
                     "sys.argv",
                     [
                         "gmaps-scraper",
-                        "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                        "https://maps.app.goo.gl/TestSavedListShortUrl",
                         "--dump-debug-output",
                     ],
                 ),
@@ -613,7 +625,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             write_debug_dump.assert_called_once_with(
-                "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                "https://maps.app.goo.gl/TestSavedListShortUrl",
                 resolved_url=artifacts.resolved_url,
                 runtime_state=artifacts.runtime_state,
                 script_texts=artifacts.script_texts,
@@ -641,7 +653,7 @@ class CliTests(unittest.TestCase):
                     "sys.argv",
                     [
                         "gmaps-scraper",
-                        "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                        "https://maps.app.goo.gl/TestSavedListShortUrl",
                         "--dump-debug-output",
                         "--debug-output-dir",
                         str(explicit_dir),
@@ -653,7 +665,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             write_debug_dump.assert_called_once_with(
-                "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                "https://maps.app.goo.gl/TestSavedListShortUrl",
                 resolved_url=artifacts.resolved_url,
                 runtime_state=artifacts.runtime_state,
                 script_texts=artifacts.script_texts,
@@ -673,7 +685,7 @@ class CliTests(unittest.TestCase):
                 "sys.argv",
                 [
                     "gmaps-scraper",
-                    "https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18",
+                    "https://maps.app.goo.gl/TestSavedListShortUrl",
                     "--kind",
                     "list",
                 ],

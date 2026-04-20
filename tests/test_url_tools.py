@@ -19,7 +19,7 @@ class UrlToolsTests(unittest.TestCase):
         self.assertEqual(extract_list_id(url), "TESTLISTABC123456789")
 
     def test_extract_list_id_returns_none_when_absent(self) -> None:
-        self.assertEqual(extract_list_id("https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18"), None)
+        self.assertEqual(extract_list_id("https://maps.app.goo.gl/TestSavedListShortUrl"), None)
 
     def test_extract_list_id_from_text_falls_back_to_placelist_marker(self) -> None:
         text = "https://www.google.com/maps/placelists/list/TESTLISTABC123456789"
@@ -28,7 +28,7 @@ class UrlToolsTests(unittest.TestCase):
 
     def test_detects_placelist_marker(self) -> None:
         self.assertTrue(has_placelist_marker("prefix maps/placelists/list/TESTLISTABC123456789"))
-        self.assertFalse(has_placelist_marker("https://maps.app.goo.gl/MG2Vd5pWBkL7hXL18"))
+        self.assertFalse(has_placelist_marker("https://maps.app.goo.gl/TestSavedListShortUrl"))
 
 
 if __name__ == "__main__":

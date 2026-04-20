@@ -19,7 +19,11 @@ _LIST_NODE = [
     ["TESTLISTABC123456789", 1, None, 1, 1],
     4,
     "https://www.google.com/maps/placelists/list/TESTLISTABC123456789",
-    "Owner",
+    [
+        "Fixture Owner",
+        "https://lh3.googleusercontent.com/a-/fixture-owner",
+        "104356373423434804635",
+    ],
     "Sample Coffee Stops",
     "Curated fixture data for parser tests",
     None,
@@ -43,6 +47,15 @@ _LIST_NODE = [
             None,
             None,
             [[[[3, None, "104356373423434804635", "❤️", [1776133481, 81561000]]]]],
+            [[1], ["7451636382641713350", "aux"]],
+            [1776063335, 302383000],
+            [1776132745, 850748000],
+            None,
+            [
+                "Fixture Owner",
+                "https://lh3.googleusercontent.com/a-/fixture-owner",
+                "104356373423434804635",
+            ],
         ],
         [
             None,
@@ -57,6 +70,20 @@ _LIST_NODE = [
                 "/g/11harborbakery",
             ],
             "Harbor Bakery",
+            None,
+            None,
+            None,
+            None,
+            [],
+            [[1], ["1234567890123456789", "aux-2"]],
+            [1776063335, 302383000],
+            [1776132745, 850748000],
+            None,
+            [
+                "Fixture Collaborator",
+                "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                "205678901234567890123",
+            ],
         ],
     ],
 ]
@@ -71,14 +98,88 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.list_id, "TESTLISTABC123456789")
         self.assertEqual(parsed.title, "Sample Coffee Stops")
         self.assertEqual(parsed.description, "Curated fixture data for parser tests")
+        self.assertEqual(
+            parsed.owner.to_dict() if parsed.owner else None,
+            {
+                "name": "Fixture Owner",
+                "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                "profile_id": "104356373423434804635",
+            },
+        )
+        self.assertEqual(
+            [owner.to_dict() for owner in parsed.collaborators],
+            [
+                {
+                    "name": "Fixture Collaborator",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                    "profile_id": "205678901234567890123",
+                }
+            ],
+        )
         self.assertEqual(len(parsed.places), 2)
         self.assertEqual(parsed.places[0].name, "Northwind Cafe")
         self.assertEqual(
             parsed.places[0].note,
             "Try the seasonal sampler.",
         )
+        self.assertEqual(
+            parsed.places[0].added_by.to_dict() if parsed.places[0].added_by else None,
+            {
+                "name": "Fixture Owner",
+                "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                "profile_id": "104356373423434804635",
+            },
+        )
         self.assertTrue(parsed.places[0].is_favorite)
+        self.assertEqual(
+            parsed.places[1].added_by.to_dict() if parsed.places[1].added_by else None,
+            {
+                "name": "Fixture Collaborator",
+                "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                "profile_id": "205678901234567890123",
+            },
+        )
         self.assertFalse(parsed.places[1].is_favorite)
+
+    def test_keeps_header_owner_first_when_collecting_collaborators(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        list_node = runtime_state[1]
+        assert isinstance(list_node, list)
+        list_node.append(
+            [
+                [
+                    "Late Collaborator",
+                    "https://lh3.googleusercontent.com/a-/late-collaborator",
+                    "305678901234567890123",
+                ]
+            ]
+        )
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(
+            parsed.owner.to_dict() if parsed.owner else None,
+            {
+                "name": "Fixture Owner",
+                "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                "profile_id": "104356373423434804635",
+            },
+        )
+        self.assertEqual(
+            [owner.to_dict() for owner in parsed.collaborators],
+            [
+                {
+                    "name": "Late Collaborator",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/late-collaborator",
+                    "profile_id": "305678901234567890123",
+                },
+                {
+                    "name": "Fixture Collaborator",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                    "profile_id": "205678901234567890123",
+                },
+            ],
+        )
         self.assertEqual(parsed.places[0].cid, "7451636382641713350")
         self.assertEqual(
             parsed.places[0].maps_url,
