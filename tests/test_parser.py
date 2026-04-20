@@ -444,6 +444,19 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.places[0].address, "123 Central Plaza")
         self.assertTrue(parsed.places[0].is_favorite)
 
+    def test_does_not_treat_heart_in_note_as_favorite(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        first_place = runtime_state[1][8][0]
+        assert isinstance(first_place, list)
+
+        first_place[3] = "Loved it ❤️"
+        first_place[7] = []
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(parsed.places[0].note, "Loved it ❤️")
+        self.assertFalse(parsed.places[0].is_favorite)
+
     def test_prefers_enclosing_place_name_over_metadata_string(self) -> None:
         runtime_state = [
             "noise",
@@ -635,6 +648,58 @@ class ParserTests(unittest.TestCase):
         self.assertNotIn(
             "104356373423434804635",
             {place.cid for place in parsed.places if place.cid is not None},
+        )
+
+    def test_keeps_owner_none_when_header_owner_is_missing(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        runtime_state[1][3] = None
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertIsNone(parsed.owner)
+        self.assertEqual(
+            [owner.to_dict() for owner in parsed.collaborators],
+            [
+                {
+                    "name": "Fixture Owner",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                    "profile_id": "104356373423434804635",
+                },
+                {
+                    "name": "Fixture Collaborator",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+                    "profile_id": "205678901234567890123",
+                },
+            ],
+        )
+
+    def test_accepts_name_only_owner_records(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        runtime_state[1][3] = ["Name Only Owner"]
+        second_place = runtime_state[1][8][1]
+        assert isinstance(second_place, list)
+        second_place[12] = ["Name Only Collaborator"]
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(
+            parsed.owner.to_dict() if parsed.owner else None,
+            {"name": "Name Only Owner"},
+        )
+        self.assertEqual(
+            [owner.to_dict() for owner in parsed.collaborators],
+            [
+                {
+                    "name": "Fixture Owner",
+                    "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                    "profile_id": "104356373423434804635",
+                },
+                {"name": "Name Only Collaborator"},
+            ],
+        )
+        self.assertEqual(
+            parsed.places[1].added_by.to_dict() if parsed.places[1].added_by else None,
+            {"name": "Name Only Collaborator"},
         )
 
     def test_raises_when_no_place_records_are_found(self) -> None:

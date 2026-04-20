@@ -281,8 +281,7 @@ def _extract_metadata(
 ) -> tuple[str | None, str | None, ListOwner | None, list[ListOwner]]:
     metadata_node = _find_metadata_node(node)
     if metadata_node is None:
-        owner, collaborators = _split_owner_list(_collect_place_owners(places))
-        return None, None, owner, collaborators
+        return None, None, None, _collect_place_owners(places)
 
     title = _clean_text(_safe_index(metadata_node, 4))
     description = _clean_text(_safe_index(metadata_node, 5))
@@ -293,9 +292,7 @@ def _extract_metadata(
         _extract_additional_list_header_owners(metadata_node),
         _collect_place_owners(places),
     )
-    if owner is None:
-        owner, collaborators = _split_owner_list(collaborators)
-    else:
+    if owner is not None:
         collaborators = _merge_owner_lists(collaborators, [])
         collaborators = [
             collaborator
@@ -375,16 +372,8 @@ def _merge_owner_lists(
     return owners
 
 
-def _split_owner_list(
-    owners: Sequence[ListOwner],
-) -> tuple[ListOwner | None, list[ListOwner]]:
-    if not owners:
-        return None, []
-    return owners[0], list(owners[1:])
-
-
 def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
-    if not isinstance(node, list) or len(node) < 1:
+    if not isinstance(node, list) or len(node) < 1 or len(node) > 3:
         return None
 
     name = _clean_text(_safe_index(node, 0))
@@ -396,8 +385,6 @@ def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
     if photo_url is not None and not photo_url.startswith(("http://", "https://")):
         return None
     if profile_id is not None and not _looks_like_profile_id(profile_id):
-        return None
-    if photo_url is None and profile_id is None:
         return None
 
     return ListOwner(name=name, photo_url=photo_url, profile_id=profile_id)
@@ -522,7 +509,8 @@ def _find_place_is_favorite(
 ) -> bool:
     if place_record is None:
         return False
-    return _contains_favorite_marker(place_record)
+    favorite_payload = _safe_index(place_record, 7)
+    return _contains_favorite_marker(favorite_payload)
 
 
 def _find_place_added_by(place_record: list[JSONValue] | None) -> ListOwner | None:
