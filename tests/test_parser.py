@@ -152,6 +152,55 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.places[0].cid, "7451636382641713350")
         self.assertEqual(parsed.places[1].cid, "1234567890123456789")
 
+    def test_keeps_distinct_places_that_share_a_cid(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        second_place = runtime_state[1][8][1]
+        assert isinstance(second_place, list)
+        second_metadata = second_place[1]
+        assert isinstance(second_metadata, list)
+
+        second_metadata[5] = [None, None, 35.7000000, 139.7800000]
+        second_metadata[6] = ["7451636382641713350", "-2234567890123456789"]
+        second_metadata[7] = None
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(len(parsed.places), 2)
+        self.assertEqual(parsed.places[0].cid, "7451636382641713350")
+        self.assertEqual(parsed.places[1].cid, "7451636382641713350")
+        self.assertEqual(parsed.places[1].lat, 35.7)
+
+    def test_does_not_use_owner_profile_id_as_place_cid(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        first_place = runtime_state[1][8][0]
+        second_place = runtime_state[1][8][1]
+        assert isinstance(first_place, list)
+        assert isinstance(second_place, list)
+
+        first_metadata = first_place[1]
+        second_metadata = second_place[1]
+        assert isinstance(first_metadata, list)
+        assert isinstance(second_metadata, list)
+
+        first_metadata[6] = ["-7451636382641713350", "-8451636382641713350"]
+        second_metadata[6] = ["-1234567890123456789", "-2234567890123456789"]
+        first_place.append(
+            ["Owner", "https://example.com/avatar.jpg", "104356373423434804635"]
+        )
+        second_place.append(
+            ["Owner", "https://example.com/avatar.jpg", "104356373423434804635"]
+        )
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(len(parsed.places), 2)
+        self.assertEqual(parsed.places[0].cid, None)
+        self.assertEqual(parsed.places[1].cid, None)
+        self.assertEqual(
+            parsed.places[0].maps_url,
+            "https://maps.google.com/?q=35.6501307,139.6868459",
+        )
+
     def test_extracts_favorite_and_note_from_user_payload_shape(self) -> None:
         runtime_state = [
             "noise",
