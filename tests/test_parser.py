@@ -80,7 +80,10 @@ class ParserTests(unittest.TestCase):
         self.assertTrue(parsed.places[0].is_favorite)
         self.assertFalse(parsed.places[1].is_favorite)
         self.assertEqual(parsed.places[0].cid, "7451636382641713350")
-        self.assertEqual(parsed.places[0].maps_url, "https://maps.google.com/?cid=7451636382641713350")
+        self.assertEqual(
+            parsed.places[0].maps_url,
+            "https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo",
+        )
 
     def test_falls_back_to_placelist_marker_without_list_id(self) -> None:
         runtime_state = ["noise", _LIST_NODE]
@@ -126,7 +129,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.list_id, "UGEPbA20Qd-OH4uoWjmDgQ")
         self.assertEqual(parsed.title, "Tokyo Dinners")
 
-    def test_builds_coordinate_query_url_when_cid_is_missing(self) -> None:
+    def test_builds_search_query_url_when_cid_is_missing(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
         place_metadata = runtime_state[1][8][0][1]
         assert isinstance(place_metadata, list)
@@ -138,7 +141,50 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.places[0].google_id, "/g/11yakumo")
         self.assertEqual(
             parsed.places[0].maps_url,
-            "https://maps.google.com/?q=35.6501307,139.6868459",
+            "https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo",
+        )
+
+    def test_builds_coordinate_query_url_only_when_no_name_or_address_exist(self) -> None:
+        runtime_state = [
+            "noise",
+            [
+                ["LIST123", 1, None, 1, 1],
+                4,
+                "https://www.google.com/maps/placelists/list/LIST123",
+                "Owner",
+                "Untitled",
+                None,
+                None,
+                None,
+                [
+                    [
+                        None,
+                        [
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            [None, None, 35.6501307, 139.6868459],
+                            [None],
+                            None,
+                        ],
+                        None,
+                        None,
+                    ]
+                ],
+            ],
+        ]
+
+        parsed = parse_saved_list_artifacts(
+            "https://www.google.com/maps/@0,0,3z/data=!4m3!11m2!2sLIST123!3e3",
+            runtime_state=runtime_state,
+        )
+
+        self.assertEqual(len(parsed.places), 1)
+        self.assertEqual(
+            parsed.places[0].maps_url,
+            "https://www.google.com/maps/search/?api=1&query=35.6501307%2C139.6868459",
         )
 
     def test_dedupes_places_with_same_cid(self) -> None:
@@ -297,6 +343,153 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             parsed.places[0].address,
             "106, Taiwan, Taipei City, Da’an District, Section 4, Zhongxiao E Rd, 97號B1樓",
+        )
+
+    def test_does_not_promote_list_title_into_place_name(self) -> None:
+        runtime_state = [
+            "noise",
+            [
+                ["LIST123", 1, None, 1, 1],
+                4,
+                "https://www.google.com/maps/placelists/list/LIST123",
+                "Owner",
+                (
+                    "Michael’s Tasmania, Australia 🇦🇺 bookmarks. "
+                    "See https://beacons.ai/demflyers for more, or follow on "
+                    "Instagram / Threads / BlueSky @demflyers"
+                ),
+                None,
+                None,
+                None,
+                [
+                    [
+                        None,
+                        [
+                            None,
+                            None,
+                            None,
+                            None,
+                            "Hive Tasmania",
+                            [None, None, -41.157461399999995, 146.1758303],
+                            ["104356373423434804635"],
+                            None,
+                        ],
+                        None,
+                        None,
+                    ]
+                ],
+            ],
+        ]
+
+        parsed = parse_saved_list_artifacts(
+            "https://www.google.com/maps/@0,0,3z/data=!4m3!11m2!2sLIST123!3e3",
+            runtime_state=runtime_state,
+        )
+
+        self.assertEqual(len(parsed.places), 1)
+        self.assertEqual(parsed.places[0].name, "Hive Tasmania")
+        self.assertEqual(parsed.places[0].address, None)
+        self.assertEqual(parsed.places[0].cid, "104356373423434804635")
+
+    def test_uses_structured_place_record_for_sparse_real_payload_shape(self) -> None:
+        owner = [
+            "Michael Wu",
+            (
+                "https://lh3.googleusercontent.com/a-/ALV-UjW_i8-Eyr6conUhZ6tzGGlFe76mQTGeURI9N"
+                "KDlca0FzlN0GY0Kjg"
+            ),
+            "104356373423434804635",
+        ]
+        runtime_state = [
+            "noise",
+            [
+                ["LIST123", 1, None, 1, 1],
+                4,
+                "https://www.google.com/maps/placelists/list/LIST123",
+                "Owner",
+                "Tasmania, Australia 🇦🇺",
+                (
+                    "Michael’s Tasmania, Australia 🇦🇺 bookmarks. "
+                    "See https://beacons.ai/demflyers for more, or follow on "
+                    "Instagram / Threads / BlueSky @demflyers"
+                ),
+                None,
+                None,
+                [
+                    [
+                        None,
+                        [
+                            None,
+                            None,
+                            (
+                                "The Source, Ether Building, 655 Main Rd, "
+                                "Berriedale TAS 7011, Australia"
+                            ),
+                            None,
+                            "Ether Building, 655 Main Rd, Berriedale TAS 7011, Australia",
+                            [None, None, -42.811949, 147.2614472],
+                            ["-6165976776628271961", "-3752281006438109761"],
+                            "/g/11g_1pnk5",
+                        ],
+                        "The Source",
+                        "",
+                        None,
+                        None,
+                        None,
+                        [],
+                        [[1], ["-6165976776628271961", "-3752281006438109761"]],
+                        [1749896974, 425450000],
+                        [1749896974, 425450000],
+                        None,
+                        owner,
+                    ],
+                    [
+                        None,
+                        [
+                            None,
+                            None,
+                            "",
+                            None,
+                            "",
+                            [None, None, -41.157461399999995, 146.1758303],
+                            ["-6162110142486463501", "-7368952120126222420"],
+                        ],
+                        "Hive Tasmania",
+                        "",
+                        None,
+                        None,
+                        None,
+                        [],
+                        [[1], ["-6162110142486463501", "-7368952120126222420"]],
+                        [1749696774, 839942000],
+                        [1749696774, 839942000],
+                        None,
+                        owner,
+                    ],
+                ],
+            ],
+        ]
+
+        parsed = parse_saved_list_artifacts(
+            "https://www.google.com/maps/@0,0,3z/data=!4m3!11m2!2sLIST123!3e3",
+            runtime_state=runtime_state,
+        )
+
+        self.assertEqual(len(parsed.places), 2)
+        self.assertEqual(parsed.places[0].name, "The Source")
+        self.assertEqual(
+            parsed.places[0].address,
+            "Ether Building, 655 Main Rd, Berriedale TAS 7011, Australia",
+        )
+        self.assertEqual(parsed.places[0].cid, "14694463067271441855")
+        self.assertEqual(parsed.places[0].google_id, "/g/11g_1pnk5")
+        self.assertEqual(parsed.places[1].name, "Hive Tasmania")
+        self.assertEqual(parsed.places[1].address, None)
+        self.assertEqual(parsed.places[1].cid, "11077791953583329196")
+        self.assertEqual(parsed.places[1].google_id, None)
+        self.assertNotIn(
+            "104356373423434804635",
+            {place.cid for place in parsed.places if place.cid is not None},
         )
 
     def test_raises_when_no_place_records_are_found(self) -> None:

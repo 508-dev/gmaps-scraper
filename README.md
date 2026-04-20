@@ -171,7 +171,7 @@ A saved list result looks like this:
       "is_favorite": true,
       "lat": 35.6501307,
       "lng": 139.6868459,
-      "maps_url": "https://maps.google.com/?cid=7451636382641713350"
+      "maps_url": "https://www.google.com/maps/search/?api=1&query=Yakumo%2C+Shibuya%2C+Tokyo"
     }
   ]
 }
