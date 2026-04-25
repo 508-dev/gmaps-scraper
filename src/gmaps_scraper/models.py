@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+type AddressParts = list[str | list[str]]
+
 
 @dataclass(slots=True)
 class ListOwner:
@@ -105,7 +107,7 @@ class PlaceDetails:
     website: str | None = None
     phone: str | None = None
     plus_code: str | None = None
-    address_parts: list[object] | None = None
+    address_parts: AddressParts | None = None
     description: str | None = None
     secondary_name: str | None = None
     lat: float | None = None

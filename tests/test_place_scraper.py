@@ -14,6 +14,7 @@ from gmaps_scraper.place_scraper import (
     _extract_preview_place_enrichment,
     _extract_secondary_name,
     _merge_place_sources,
+    _normalize_google_place_id,
     _normalize_phone_candidate,
     _normalize_preview_website,
     _parse_review_count,
@@ -308,6 +309,29 @@ class PlaceScraperTests(unittest.TestCase):
 
         self.assertEqual(description, "Open now for lunch and dinner service.")
 
+    def test_extract_preview_place_enrichment_rejects_invalid_address_parts(self) -> None:
+        payload_data = [
+            [
+                [
+                    [
+                        "2 Chome Jingumae",
+                        "Jingumae, 2 Chome−3−18 建築家会館ＪＩＡ館",
+                        "Jingumae, 2 Chome−3−18 建築家会館ＪＩＡ館",
+                        "Shibuya",
+                        "150-0001",
+                        "Tokyo",
+                        "JP",
+                        ["Floor 1", 3],
+                    ],
+                    ["0ahUKE", "8Q7XMPF7+73", ["MPF7+73 Shibuya, Tokyo, Japan"], 3],
+                ]
+            ]
+        ]
+        payload = ")]}'\n" + json.dumps(payload_data, ensure_ascii=False)
+        enrichment = _extract_preview_place_enrichment(payload)
+
+        self.assertNotIn("address_parts", enrichment)
+
     def test_extract_preview_coordinates_ignores_short_integer_pairs(self) -> None:
         root = [
             [1, 2],
@@ -478,6 +502,34 @@ class PlaceScraperTests(unittest.TestCase):
                 "JP",
                 ["Floor 1"],
             ],
+        )
+
+    def test_build_place_details_rejects_invalid_address_parts(self) -> None:
+        details = _build_place_details(
+            "https://www.google.com/maps/place/Den",
+            resolved_url="https://www.google.com/maps/place/Den/@35.6731762,139.7127216,17z",
+            snapshot={
+                "name": "Den",
+                "address_parts": [
+                    "2 Chome Jingumae",
+                    "Jingumae, 2 Chome−3−18 建築家会館ＪＩＡ館",
+                    "Jingumae, 2 Chome−3−18 建築家会館ＪＩＡ館",
+                    "Shibuya",
+                    "150-0001",
+                    "Tokyo",
+                    "JP",
+                    ["Floor 1", 3],
+                ],
+                "body_text": "Den\nJapanese restaurant",
+            },
+        )
+
+        self.assertIsNone(details.address_parts)
+
+    def test_normalize_google_place_id_accepts_trailing_hyphen(self) -> None:
+        self.assertEqual(
+            _normalize_google_place_id("ChIJabcdefghij-"),
+            "ChIJabcdefghij-",
         )
 
     def test_build_place_details_rejects_street_view_as_photo(self) -> None:
