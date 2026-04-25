@@ -158,6 +158,15 @@ class PlaceScraperTests(unittest.TestCase):
                 None,
                 None,
                 None,
+                [
+                    [
+                        "0x60188c981788132b:0x6ef132909b155a88",
+                        None,
+                        None,
+                        "/m/0131whcb",
+                        "ChIJ8T36HxCLGGARvpARPDyaKLA",
+                    ]
+                ],
                 None,
                 None,
                 None,
@@ -260,6 +269,7 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(enrichment["description"], "Modern setting for fine dining menus")
         self.assertEqual(enrichment["lat"], 35.6731762)
         self.assertEqual(enrichment["lng"], 139.7127216)
+        self.assertEqual(enrichment["google_place_id"], "ChIJ8T36HxCLGGARvpARPDyaKLA")
 
     def test_extract_preview_description_preserves_text_starting_with_open(self) -> None:
         description = _extract_preview_description(
@@ -420,6 +430,19 @@ class PlaceScraperTests(unittest.TestCase):
             details.photo_url,
             "https://lh3.googleusercontent.com/p/example=s680-w680-h510",
         )
+
+    def test_build_place_details_preserves_google_place_id(self) -> None:
+        details = _build_place_details(
+            "https://www.google.com/maps/place/Den",
+            resolved_url="https://www.google.com/maps/place/Den/@35.6731762,139.7127216,17z",
+            snapshot={
+                "name": "Den",
+                "google_place_id": "ChIJ8T36HxCLGGARvpARPDyaKLA",
+                "body_text": "Den\nJapanese restaurant",
+            },
+        )
+
+        self.assertEqual(details.google_place_id, "ChIJ8T36HxCLGGARvpARPDyaKLA")
 
     def test_build_place_details_rejects_street_view_as_photo(self) -> None:
         details = _build_place_details(
