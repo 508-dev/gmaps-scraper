@@ -132,7 +132,7 @@ _PLACE_JS_EXTRACTOR = r"""
       return true;
     }
     const label = element.getAttribute?.("aria-label") || "";
-    return /review/i.test(label);
+    return /(^|\W)reviews?(\W|$)/i.test(label);
   };
 
   const firstImageUrl = (selectors, root = panel) => {
