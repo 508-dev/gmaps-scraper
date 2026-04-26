@@ -26,20 +26,6 @@ If you vendor the package, also add the runtime dependency:
 uv add curl-cffi cloakbrowser
 ```
 
-## Development
-
-Install the git hooks locally:
-
-```bash
-uv run prek install
-```
-
-Run the same checks on demand:
-
-```bash
-uv run prek run --all-files
-```
-
 ## CLI
 
 The package installs a `gmaps-scraper` command.
@@ -249,6 +235,18 @@ Run the quality gates:
 ```bash
 ./scripts/lint.sh
 ./scripts/typecheck.sh
+```
+
+Install the git hooks locally:
+
+```bash
+uv run prek install
+```
+
+Run the same checks on demand:
+
+```bash
+uv run prek run --all-files
 ```
 
 Run tests:
