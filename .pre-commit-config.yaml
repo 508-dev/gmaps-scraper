@@ -5,11 +5,13 @@ repos:
         name: ruff
         entry: ./scripts/lint.sh
         language: system
+        always_run: true
         pass_filenames: false
         types_or: [python, pyi]
       - id: mypy
         name: mypy
         entry: ./scripts/typecheck.sh
         language: system
+        always_run: true
         pass_filenames: false
         types_or: [python, pyi]
