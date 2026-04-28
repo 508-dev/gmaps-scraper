@@ -24,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.GH_AUTOMATION_TOKEN != '' && secrets.GH_AUTOMATION_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: "TODO to Issue"
         uses: "alstr/todo-to-issue-action@ef4bdc83227fa91c8e7525a122b0215f4b05039c"
@@ -38,7 +38,11 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Commit and Push Changes
+        env:
+          PUSH_TOKEN: ${{ secrets.GH_AUTOMATION_TOKEN != '' && secrets.GH_AUTOMATION_TOKEN || github.token }}
         run: |
+          git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
           git add -A
           has_stash=0
           if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
