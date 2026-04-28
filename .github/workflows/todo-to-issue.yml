@@ -7,6 +7,10 @@ on:
     types:
       - closed
 
+concurrency:
+  group: todo-to-issue-${{ github.event.pull_request.base.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     if: github.event.pull_request.merged == true
@@ -16,13 +20,13 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: "actions/checkout@v6"
+      - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
         with:
           fetch-depth: 0
           ref: main
 
       - name: "TODO to Issue"
-        uses: "alstr/todo-to-issue-action@v5"
+        uses: "alstr/todo-to-issue-action@ef4bdc83227fa91c8e7525a122b0215f4b05039c"
         with:
           IDENTIFIERS: '[{"name": "BUG", "labels": []}, {"name": "FIXME", "labels": []}, {"name": "TODO", "labels": []}]'
           INSERT_ISSUE_URLS: "true"
