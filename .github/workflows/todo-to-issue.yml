@@ -24,6 +24,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
+          token: ${{ secrets.GH_AUTOMATION_TOKEN != '' && secrets.GH_AUTOMATION_TOKEN || github.token }}
 
       - name: "TODO to Issue"
         uses: "alstr/todo-to-issue-action@ef4bdc83227fa91c8e7525a122b0215f4b05039c"
