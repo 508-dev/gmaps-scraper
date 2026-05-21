@@ -117,6 +117,7 @@ place = scrape_place(
     place_url,
     browser_session=BrowserSessionConfig(
         profile_dir=Path(".gmaps-scraper/session"),
+        human_mouse=True,
     ),
 )
 
