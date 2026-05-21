@@ -2038,6 +2038,8 @@ def _browser_session_for_parallel_worker(
     return BrowserSessionConfig(
         profile_dir=browser_session.profile_dir / f"worker-{worker_index + 1}",
         proxy=browser_session.proxy,
+        window_size=browser_session.window_size,
+        human_mouse=browser_session.human_mouse,
     )
 
 
