@@ -62,7 +62,7 @@ Batch scrape places:
 uv run gmaps-scraper \
   --kind place \
   --input places.txt \
-  --session-dir "$CONDUCTOR_ROOT_PATH/.gmaps-scraper/session" \
+  --session-dir .gmaps-scraper/session \
   --max-retries 2 \
   --stagger-ms 500 \
   --output place-results.json
@@ -91,7 +91,7 @@ uv run gmaps-scraper \
   --kind place \
   --input places.txt \
   --llm-repair \
-  --llm-cache-dir "$CONDUCTOR_ROOT_PATH/.gmaps-scraper/llm-cache"
+  --llm-cache-dir .gmaps-scraper/llm-cache
 ```
 
 ## Library Usage
