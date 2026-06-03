@@ -196,8 +196,12 @@ the CLI, when a refresh only needs overview facts.
   LLM setup, cache behavior, and downstream refresh examples
 - [Architecture](docs/ARCHITECTURE.md): extraction layers, diagnostics, LLM repair,
   translation memory, and session/concurrency design
+- [Supply Chain](docs/supply-chain.md): dependency cooldowns, locked installs,
+  and local artifact handling
 - [Contributing](CONTRIBUTING.md): local development, tests, PR expectations,
   and translation-memory promotion
+- [Security](SECURITY.md): vulnerability reporting, secret handling, and
+  dependency policy
 
 ## Development
 
@@ -205,5 +209,11 @@ the CLI, when a refresh only needs overview facts.
 uv sync --dev
 ./scripts/lint.sh
 ./scripts/typecheck.sh
-uv run python -m unittest discover -s tests
+./scripts/test.sh
+```
+
+Run the complete local gate with:
+
+```bash
+./scripts/check-all.sh
 ```
