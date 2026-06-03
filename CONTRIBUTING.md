@@ -25,8 +25,8 @@ Run the local gates before opening or updating a PR:
 ./scripts/check-all.sh
 ```
 
-`./scripts/check-all.sh` is the same local gate in one command. It runs Ruff,
-MyPy, and unit tests.
+`./scripts/check-all.sh` is the same local gate in one command. It runs linting,
+type checking, and unit tests.
 
 Dependency changes should follow [docs/supply-chain.md](docs/supply-chain.md):
 keep `uv.lock` committed and prefer locked installs.
