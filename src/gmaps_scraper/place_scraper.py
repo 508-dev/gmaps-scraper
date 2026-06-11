@@ -1029,11 +1029,19 @@ _PLACE_JS_EXTRACTOR = r"""
       "i",
     );
     const providerHostPattern = new RegExp(
-      "(opentable|resy|sevenrooms|thefork|tock|quandoo|yelp|inline|"
+      "(^|[.-])(?:opentable|resy|sevenrooms|thefork|tock|quandoo|yelp|inline|"
         + "tablecheck|exploretock|omakase|pocket-concierge|pocketconcierge|"
-        + "tabelog|hotpepper|gnavi|gurunavi|ikyu|jpneazy|byfood|autoreserve)",
+        + "tabelog|hotpepper|gnavi|gurunavi|ikyu|jpneazy|byfood|autoreserve)"
+        + "([.-]|$)",
       "i",
     );
+    const providerHostMatches = (href) => {
+      try {
+        return providerHostPattern.test(new URL(href).hostname);
+      } catch {
+        return false;
+      }
+    };
     for (const element of panel.querySelectorAll("a[href]")) {
       const href = element.href || element.getAttribute("href") || "";
       if (!/^https?:\/\//i.test(href) || seen.has(href)) {
@@ -1045,9 +1053,8 @@ _PLACE_JS_EXTRACTOR = r"""
         element.getAttribute("aria-label"),
         element.getAttribute("title"),
         element.getAttribute("data-item-id"),
-        href,
       ].filter(Boolean).join(" ");
-      if (!reservationPattern.test(evidence) && !providerHostPattern.test(evidence)) {
+      if (!reservationPattern.test(evidence) && !providerHostMatches(href)) {
         continue;
       }
       seen.add(href);
@@ -1317,11 +1324,19 @@ _PLACE_RESERVATION_DIALOG_JS = r"""
     return cleaned || providerLabelFromUrl(href);
   };
   const providerHostPattern = new RegExp(
-    "(opentable|resy|sevenrooms|thefork|tock|quandoo|yelp|inline|"
+    "(^|[.-])(?:opentable|resy|sevenrooms|thefork|tock|quandoo|yelp|inline|"
       + "tablecheck|exploretock|omakase|pocket-concierge|pocketconcierge|"
-      + "tabelog|hotpepper|gnavi|gurunavi|ikyu|jpneazy|byfood|autoreserve)",
+      + "tabelog|hotpepper|gnavi|gurunavi|ikyu|jpneazy|byfood|autoreserve)"
+      + "([.-]|$)",
     "i",
   );
+  const providerHostMatches = (href) => {
+    try {
+      return providerHostPattern.test(new URL(href).hostname);
+    } catch {
+      return false;
+    }
+  };
   const rejectHostPattern = new RegExp(
     String.raw`(^|\.)google(?:\.[a-z]{2,}){1,2}$`
       + String.raw`|(^|\.)gstatic\.com$`
@@ -1346,7 +1361,7 @@ _PLACE_RESERVATION_DIALOG_JS = r"""
   }).sort((left, right) => {
     const leftRect = left.getBoundingClientRect();
     const rightRect = right.getBoundingClientRect();
-    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+    return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
   });
   const providerRoots = dialogs.length ? dialogs : providerPanels.slice(0, 1);
   const roots = providerRoots.length ? providerRoots : [document.body];
@@ -1389,11 +1404,10 @@ _PLACE_RESERVATION_DIALOG_JS = r"""
         element.getAttribute("aria-label"),
         element.getAttribute("title"),
       ].filter(Boolean).join(" ");
-      const evidence = `${rawLabel} ${href}`;
       if (rejectHostPattern.test(host) && !/\/maps\/reserve\b/i.test(href)) {
         continue;
       }
-      if (!hasTrustedProviderRoot && !providerHostPattern.test(evidence)) {
+      if (!hasTrustedProviderRoot && !providerHostMatches(href)) {
         continue;
       }
       seen.add(href);
@@ -2930,11 +2944,11 @@ def _merge_reservation_links(
             raw_url = _clean_text(raw_link.get("url"))
             if raw_url is None:
                 continue
-            url = _normalize_preview_website(raw_url)
+            url = _normalize_reservation_url(raw_url)
             if url is None or url in seen_urls:
                 continue
             seen_urls.add(url)
-            links.append(raw_link)
+            links.append({**raw_link, "url": url})
     if links:
         merged["reservation_links"] = links
     return merged
@@ -4144,19 +4158,49 @@ def _normalize_preview_website(value: str) -> str | None:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"}:
         return None
-    if parsed.netloc.endswith("google.com") or parsed.netloc.endswith("gstatic.com"):
+    host = (parsed.hostname or "").lower()
+    if _is_google_host(host) or _host_matches_domain(host, "gstatic.com"):
         query = parse_qs(parsed.query)
         target = query.get("q", [None])[0]
         if target is None:
             return None
         return _normalize_preview_website(unquote(target))
-    if "googleusercontent.com" in parsed.netloc:
+    if _host_matches_domain(host, "googleusercontent.com"):
         return None
-    if "streetviewpixels-pa.googleapis.com" in parsed.netloc:
+    if _host_matches_domain(host, "streetviewpixels-pa.googleapis.com"):
         return None
-    if parsed.netloc.endswith("inline.app"):
+    if _host_matches_domain(host, "inline.app"):
         return None
     return value
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    return host == domain or host.endswith(f".{domain}")
+
+
+def _is_google_host(host: str) -> bool:
+    return re.search(r"(^|\.)google(?:\.[a-z0-9-]+){1,2}$", host) is not None
+
+
+def _normalize_reservation_url(value: object) -> str | None:
+    url = _clean_text(value)
+    if url is None:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    host = (parsed.hostname or "").lower()
+    if _is_google_host(host) or _host_matches_domain(host, "gstatic.com"):
+        query = parse_qs(parsed.query)
+        target = query.get("q", [None])[0]
+        if target is not None:
+            return _normalize_reservation_url(unquote(target))
+        return url if _reservation_link_is_google_reserve(url) else None
+    if _host_matches_domain(host, "googleusercontent.com"):
+        return None
+    if _host_matches_domain(host, "streetviewpixels-pa.googleapis.com"):
+        return None
+    return url
 
 
 def _normalize_photo_url(value: object) -> str | None:
@@ -4824,12 +4868,7 @@ def _normalize_reservation_links(value: object) -> list[PlaceReservationLink]:
         url = _clean_text(raw_url)
         if url is None:
             continue
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            continue
-        normalized_url = _normalize_preview_website(url) if "google.com" in parsed.netloc else url
-        if normalized_url is None:
-            normalized_url = url if parsed.netloc.endswith("google.com") else None
+        normalized_url = _normalize_reservation_url(url)
         if normalized_url is None or normalized_url in seen_urls:
             continue
         label = _clean_reservation_label(raw_label, normalized_url)
@@ -4842,11 +4881,8 @@ def _normalize_reservation_links(value: object) -> list[PlaceReservationLink]:
 
 def _reservation_link_is_google_reserve(url: str) -> bool:
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
-    return (
-        host in {"www.google.com", "google.com", "maps.google.com"}
-        and parsed.path.startswith("/maps/reserve")
-    )
+    host = (parsed.hostname or "").lower()
+    return _is_google_host(host) and parsed.path.startswith("/maps/reserve")
 
 
 def _clean_reservation_label(value: object, url: str) -> str:

@@ -200,7 +200,17 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertIn("about these providers", _PLACE_RESERVATION_DIALOG_JS)
         self.assertIn("hasTrustedProviderRoot", _PLACE_RESERVATION_DIALOG_JS)
         self.assertIn("closeProviderRoot", _PLACE_RESERVATION_DIALOG_JS)
+        self.assertIn(
+            "return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);",
+            _PLACE_RESERVATION_DIALOG_JS,
+        )
         self.assertIn("KeyboardEvent", _PLACE_RESERVATION_DIALOG_JS)
+
+    def test_reservation_extractors_match_provider_hosts_with_boundaries(self) -> None:
+        for script in (_PLACE_JS_EXTRACTOR, _PLACE_RESERVATION_DIALOG_JS):
+            self.assertIn("providerHostMatches", script)
+            self.assertIn("(^|[.-])(?:opentable|resy|sevenrooms", script)
+            self.assertNotIn("providerHostPattern.test(evidence)", script)
 
     def test_reservation_extractors_do_not_match_generic_booking_copy(self) -> None:
         for script in (
@@ -247,6 +257,24 @@ class PlaceScraperTests(unittest.TestCase):
                 {"label": "Resy", "url": "https://resy.com/example"},
                 {"label": "TableCheck", "url": "https://www.tablecheck.com/example"},
             ],
+        )
+
+    def test_merge_reservation_links_stores_normalized_redirect_urls(self) -> None:
+        merged = _merge_reservation_links(
+            {
+                "reservation_links": [
+                    {
+                        "label": "Inline",
+                        "url": "https://www.google.com:443/url?q=https%3A%2F%2Finline.app%2Fbooking%2Ffoo",
+                    }
+                ]
+            },
+            {"reservation_links": []},
+        )
+
+        self.assertEqual(
+            merged["reservation_links"],
+            [{"label": "Inline", "url": "https://inline.app/booking/foo"}],
         )
 
     def test_scrape_places_reuses_context_and_retries_quality_flags(self) -> None:
@@ -2794,6 +2822,62 @@ class PlaceScraperTests(unittest.TestCase):
                 {"label": "Ikyu", "url": "https://restaurant.ikyu.com/112767/?ikgo=2"},
                 {"label": "AutoReserve", "url": "https://autoreserve.com/restaurants/example"},
                 {"label": "SG Management", "url": "https://sg-management.jp/reserve/"},
+            ],
+        )
+
+    def test_normalize_reservation_links_unwraps_provider_redirects(self) -> None:
+        links = _normalize_reservation_links(
+            [
+                {
+                    "label": "Find a table Inline",
+                    "url": "https://www.google.com:443/url?q=https%3A%2F%2Finline.app%2Fbooking%2Ffoo",
+                }
+            ]
+        )
+
+        self.assertEqual(
+            [link.to_dict() for link in links],
+            [{"label": "Inline", "url": "https://inline.app/booking/foo"}],
+        )
+
+    def test_normalize_reservation_links_drops_google_reserve_cctld(self) -> None:
+        links = _normalize_reservation_links(
+            [
+                {
+                    "label": "Reserve a table",
+                    "url": "https://www.google.com.sg/maps/reserve/v/dine/c/example",
+                },
+                {
+                    "label": "TableCheck",
+                    "url": "https://www.tablecheck.com/example",
+                },
+            ]
+        )
+
+        self.assertEqual(
+            [link.to_dict() for link in links],
+            [{"label": "TableCheck", "url": "https://www.tablecheck.com/example"}],
+        )
+
+    def test_normalize_reservation_links_ignores_google_substring_hosts(self) -> None:
+        links = _normalize_reservation_links(
+            [
+                {
+                    "label": "Reserve",
+                    "url": "https://evilgoogle.com/maps/reserve/v/dine/c/example",
+                },
+                {
+                    "label": "TableCheck",
+                    "url": "https://www.tablecheck.com/example",
+                },
+            ]
+        )
+
+        self.assertEqual(
+            [link.url for link in links],
+            [
+                "https://evilgoogle.com/maps/reserve/v/dine/c/example",
+                "https://www.tablecheck.com/example",
             ],
         )
 
