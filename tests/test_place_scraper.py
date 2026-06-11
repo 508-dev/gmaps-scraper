@@ -207,10 +207,11 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertIn("KeyboardEvent", _PLACE_RESERVATION_DIALOG_JS)
 
     def test_reservation_extractors_match_provider_hosts_with_boundaries(self) -> None:
-        for script in (_PLACE_JS_EXTRACTOR, _PLACE_RESERVATION_DIALOG_JS):
-            self.assertIn("providerHostMatches", script)
-            self.assertIn("(^|[.-])(?:opentable|resy|sevenrooms", script)
-            self.assertNotIn("providerHostPattern.test(evidence)", script)
+        self.assertNotIn("providerHostMatches", _PLACE_JS_EXTRACTOR)
+        self.assertIn("if (!reservationPattern.test(evidence))", _PLACE_JS_EXTRACTOR)
+        self.assertIn("providerHostMatches", _PLACE_RESERVATION_DIALOG_JS)
+        self.assertIn("(^|[.-])(?:opentable|resy|sevenrooms", _PLACE_RESERVATION_DIALOG_JS)
+        self.assertNotIn("providerHostPattern.test(evidence)", _PLACE_RESERVATION_DIALOG_JS)
 
     def test_reservation_extractors_do_not_match_generic_booking_copy(self) -> None:
         for script in (

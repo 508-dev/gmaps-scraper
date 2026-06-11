@@ -1028,20 +1028,6 @@ _PLACE_JS_EXTRACTOR = r"""
       String.raw`\b(find a table|reserve|reservation|book a table)\b`,
       "i",
     );
-    const providerHostPattern = new RegExp(
-      "(^|[.-])(?:opentable|resy|sevenrooms|thefork|tock|quandoo|yelp|inline|"
-        + "tablecheck|exploretock|omakase|pocket-concierge|pocketconcierge|"
-        + "tabelog|hotpepper|gnavi|gurunavi|ikyu|jpneazy|byfood|autoreserve)"
-        + "([.-]|$)",
-      "i",
-    );
-    const providerHostMatches = (href) => {
-      try {
-        return providerHostPattern.test(new URL(href).hostname);
-      } catch {
-        return false;
-      }
-    };
     for (const element of panel.querySelectorAll("a[href]")) {
       const href = element.href || element.getAttribute("href") || "";
       if (!/^https?:\/\//i.test(href) || seen.has(href)) {
@@ -1054,7 +1040,7 @@ _PLACE_JS_EXTRACTOR = r"""
         element.getAttribute("title"),
         element.getAttribute("data-item-id"),
       ].filter(Boolean).join(" ");
-      if (!reservationPattern.test(evidence) && !providerHostMatches(href)) {
+      if (!reservationPattern.test(evidence)) {
         continue;
       }
       seen.add(href);
