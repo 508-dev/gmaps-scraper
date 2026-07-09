@@ -335,6 +335,9 @@ class ParserTests(unittest.TestCase):
 
     def test_dedupes_places_with_cid_alias(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        original_metadata = runtime_state[1][8][0][1]
+        assert isinstance(original_metadata, list)
+        original_metadata[7] = None
         duplicate_place = copy.deepcopy(runtime_state[1][8][0])
         duplicate_metadata = duplicate_place[1]
         assert isinstance(duplicate_metadata, list)
@@ -347,6 +350,46 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(parsed.places), 2)
         self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
         self.assertEqual(parsed.places[1].cid, _HARBOR_CID)
+
+    def test_prefers_canonical_place_when_cid_alias_duplicate_appears_first(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        duplicate_place = copy.deepcopy(runtime_state[1][8][0])
+        duplicate_metadata = duplicate_place[1]
+        assert isinstance(duplicate_metadata, list)
+        duplicate_metadata[6] = [_NORTHWIND_CELL_ID]
+        duplicate_metadata[7] = None
+        runtime_state[1][8].insert(0, duplicate_place)
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(len(parsed.places), 2)
+        self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
+        self.assertEqual(parsed.places[0].cid_aliases, [_NORTHWIND_CELL_ID])
+        self.assertEqual(parsed.places[0].google_id, "/g/11northwind")
+        self.assertEqual(parsed.places[1].cid, _HARBOR_CID)
+
+    def test_keeps_distinct_places_with_same_cid_alias_and_coordinates(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        first_place = runtime_state[1][8][0]
+        second_place = runtime_state[1][8][1]
+        assert isinstance(first_place, list)
+        assert isinstance(second_place, list)
+        first_metadata = first_place[1]
+        second_metadata = second_place[1]
+        assert isinstance(first_metadata, list)
+        assert isinstance(second_metadata, list)
+        first_metadata[7] = None
+        second_metadata[5] = [None, None, 35.6501307, 139.6868459]
+        second_metadata[6] = [_NORTHWIND_CELL_ID, _HARBOR_CID]
+        second_metadata[7] = None
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(len(parsed.places), 2)
+        self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
+        self.assertEqual(parsed.places[1].cid, _HARBOR_CID)
+        self.assertEqual(parsed.places[0].cid_aliases, [_NORTHWIND_CELL_ID])
+        self.assertEqual(parsed.places[1].cid_aliases, [_NORTHWIND_CELL_ID])
 
     def test_keeps_distinct_places_that_share_a_cid(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])

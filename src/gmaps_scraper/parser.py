@@ -71,6 +71,12 @@ class _Candidate:
     signal_score: int
 
 
+@dataclass(frozen=True, slots=True)
+class _PlaceDedupeKeys:
+    primary: set[str]
+    aliases: set[str]
+
+
 class ParseError(RuntimeError):
     """Raised when a saved list cannot be parsed from the supplied artifacts."""
 
@@ -388,7 +394,8 @@ def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
 
 def _extract_places(node: JSONValue) -> list[Place]:
     places: list[Place] = []
-    seen: set[str] = set()
+    primary_key_indexes: dict[str, int] = {}
+    alias_key_indexes: dict[str, int] = {}
 
     for current, ancestors in _walk_json(node):
         if not _is_coordinate_tuple(current):
@@ -428,22 +435,88 @@ def _extract_places(node: JSONValue) -> list[Place]:
             is_favorite=is_favorite,
             added_by=_find_place_added_by(place_record),
         )
-        dedupe_keys: set[str] = set()
-        if google_id:
-            dedupe_keys.add(f"gid:{google_id}")
-        if cid is not None:
-            dedupe_keys.update({
-                f"cid:{cid_value}:{lat:.6f}:{lng:.6f}"
-                for cid_value in [cid, *cid_aliases]
-            })
-        if not dedupe_keys:
-            dedupe_keys = {f"name:{place.name}:{lat:.6f}:{lng:.6f}"}
-        if seen.intersection(dedupe_keys):
+        dedupe_keys = _place_dedupe_keys(place)
+        duplicate_index = _duplicate_place_index(
+            dedupe_keys,
+            primary_key_indexes=primary_key_indexes,
+            alias_key_indexes=alias_key_indexes,
+        )
+        if duplicate_index is not None:
+            if _place_dedupe_quality(place) > _place_dedupe_quality(places[duplicate_index]):
+                places[duplicate_index] = place
+                _record_place_dedupe_keys(
+                    duplicate_index,
+                    dedupe_keys,
+                    primary_key_indexes=primary_key_indexes,
+                    alias_key_indexes=alias_key_indexes,
+                )
             continue
-        seen.update(dedupe_keys)
         places.append(place)
+        _record_place_dedupe_keys(
+            len(places) - 1,
+            dedupe_keys,
+            primary_key_indexes=primary_key_indexes,
+            alias_key_indexes=alias_key_indexes,
+        )
 
     return places
+
+
+def _place_dedupe_keys(place: Place) -> _PlaceDedupeKeys:
+    primary: set[str] = set()
+    aliases: set[str] = set()
+    if place.google_id:
+        primary.add(f"gid:{place.google_id}")
+    if place.cid is not None:
+        cid_suffix = f"{place.lat:.6f}:{place.lng:.6f}"
+        primary.add(f"cid:{place.cid}:{cid_suffix}")
+        aliases.update(
+            f"cid:{cid_alias}:{cid_suffix}"
+            for cid_alias in place.cid_aliases
+        )
+    if not primary:
+        primary.add(f"name:{place.name}:{place.lat:.6f}:{place.lng:.6f}")
+    return _PlaceDedupeKeys(primary=primary, aliases=aliases)
+
+
+def _duplicate_place_index(
+    keys: _PlaceDedupeKeys,
+    *,
+    primary_key_indexes: dict[str, int],
+    alias_key_indexes: dict[str, int],
+) -> int | None:
+    for key in keys.primary:
+        if key in primary_key_indexes:
+            return primary_key_indexes[key]
+    for key in keys.aliases:
+        if key in primary_key_indexes:
+            return primary_key_indexes[key]
+    for key in keys.primary:
+        if key in alias_key_indexes:
+            return alias_key_indexes[key]
+    return None
+
+
+def _record_place_dedupe_keys(
+    index: int,
+    keys: _PlaceDedupeKeys,
+    *,
+    primary_key_indexes: dict[str, int],
+    alias_key_indexes: dict[str, int],
+) -> None:
+    for key in keys.primary:
+        primary_key_indexes[key] = index
+    for key in keys.aliases:
+        alias_key_indexes[key] = index
+
+
+def _place_dedupe_quality(place: Place) -> tuple[bool, bool, bool, bool]:
+    return (
+        place.google_id is not None,
+        bool(place.cid_aliases),
+        place.cid is not None,
+        place.address is not None,
+    )
 
 
 def _find_place_metadata(ancestors: Sequence[JSONValue]) -> list[JSONValue] | None:
