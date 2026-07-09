@@ -405,6 +405,7 @@ def _extract_places(node: JSONValue) -> list[Place]:
             metadata_node = _find_place_metadata(ancestors)
         address = _extract_address(metadata_node)
         cid = _find_cid(metadata_node)
+        cid_aliases = _find_cid_aliases(metadata_node)
         google_id = _find_google_id(metadata_node)
         name = _find_place_name(ancestors, address=address, place_record=place_record)
         note = _find_place_note(place_record, name=name, address=address)
@@ -422,6 +423,7 @@ def _extract_places(node: JSONValue) -> list[Place]:
                 lng=lng,
             ),
             cid=cid,
+            cid_aliases=cid_aliases,
             google_id=google_id,
             is_favorite=is_favorite,
             added_by=_find_place_added_by(place_record),
@@ -597,6 +599,19 @@ def _find_cid(node: list[JSONValue] | None) -> str | None:
     return None
 
 
+def _find_cid_aliases(node: list[JSONValue] | None) -> list[str]:
+    if node is None:
+        return []
+    structured_value = _safe_index(node, 6)
+    structured_cid = _find_cid_in_structured_slot(structured_value)
+    if structured_cid is None:
+        return []
+    return _find_cid_aliases_in_structured_slot(
+        structured_value,
+        selected_cid=structured_cid,
+    )
+
+
 def _find_google_id(node: list[JSONValue] | None) -> str | None:
     if node is None:
         return None
@@ -658,6 +673,27 @@ def _find_cid_in_structured_slot(value: JSONValue | None) -> str | None:
     if len(numeric_texts) >= 2:
         return _normalize_cid_token(numeric_texts[1])
     return _normalize_cid_token(numeric_texts[0])
+
+
+def _find_cid_aliases_in_structured_slot(
+    value: JSONValue | None,
+    *,
+    selected_cid: str,
+) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    owner = _parse_list_owner(value)
+    if owner is not None and (owner.photo_url is not None or owner.profile_id is not None):
+        return []
+    aliases: list[str] = []
+    for item in value:
+        text = _clean_text(item)
+        if text is None or _LONG_INTEGER_PATTERN.fullmatch(text) is None:
+            continue
+        alias = _normalize_cid_token(text)
+        if alias != selected_cid and alias not in aliases:
+            aliases.append(alias)
+    return aliases
 
 
 def _find_cid_in_fallback_value(value: JSONValue | None) -> str | None:

@@ -81,6 +81,7 @@ class Place:
     lng: float
     maps_url: str
     cid: str | None = None
+    cid_aliases: list[str] = field(default_factory=list)
     google_id: str | None = None
     is_favorite: bool = False
     added_by: ListOwner | None = None
@@ -100,6 +101,8 @@ class Place:
             del result["note"]
         if self.cid is not None:
             result["cid"] = self.cid
+        if self.cid_aliases:
+            result["cid_aliases"] = self.cid_aliases
         if self.google_id is not None:
             result["google_id"] = self.google_id
         if self.added_by is not None:

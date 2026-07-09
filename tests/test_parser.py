@@ -255,6 +255,7 @@ class ParserTests(unittest.TestCase):
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
 
         self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
+        self.assertEqual(parsed.places[0].cid_aliases, [_NORTHWIND_CELL_ID])
         self.assertNotEqual(parsed.places[0].cid, _NORTHWIND_CELL_ID)
 
     def test_normalizes_negative_slot_6_fingerprint(self) -> None:
