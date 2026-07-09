@@ -71,6 +71,12 @@ class _Candidate:
     signal_score: int
 
 
+@dataclass(frozen=True, slots=True)
+class _PlaceDedupeKeys:
+    primary: set[str]
+    aliases: set[str]
+
+
 class ParseError(RuntimeError):
     """Raised when a saved list cannot be parsed from the supplied artifacts."""
 
@@ -388,7 +394,8 @@ def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
 
 def _extract_places(node: JSONValue) -> list[Place]:
     places: list[Place] = []
-    seen: set[str] = set()
+    primary_key_indexes: dict[str, int] = {}
+    alias_key_indexes: dict[str, int] = {}
 
     for current, ancestors in _walk_json(node):
         if not _is_coordinate_tuple(current):
@@ -405,6 +412,7 @@ def _extract_places(node: JSONValue) -> list[Place]:
             metadata_node = _find_place_metadata(ancestors)
         address = _extract_address(metadata_node)
         cid = _find_cid(metadata_node)
+        cid_aliases = _find_cid_aliases(metadata_node)
         google_id = _find_google_id(metadata_node)
         name = _find_place_name(ancestors, address=address, place_record=place_record)
         note = _find_place_note(place_record, name=name, address=address)
@@ -422,21 +430,93 @@ def _extract_places(node: JSONValue) -> list[Place]:
                 lng=lng,
             ),
             cid=cid,
+            cid_aliases=cid_aliases,
             google_id=google_id,
             is_favorite=is_favorite,
             added_by=_find_place_added_by(place_record),
         )
-        dedupe_key = (
-            google_id
-            or (f"{cid}:{lat:.6f}:{lng:.6f}" if cid is not None else None)
-            or f"{place.name}:{lat:.6f}:{lng:.6f}"
+        dedupe_keys = _place_dedupe_keys(place)
+        duplicate_index = _duplicate_place_index(
+            dedupe_keys,
+            primary_key_indexes=primary_key_indexes,
+            alias_key_indexes=alias_key_indexes,
         )
-        if dedupe_key in seen:
+        if duplicate_index is not None:
+            if _place_dedupe_quality(place) > _place_dedupe_quality(places[duplicate_index]):
+                places[duplicate_index] = place
+                _record_place_dedupe_keys(
+                    duplicate_index,
+                    dedupe_keys,
+                    primary_key_indexes=primary_key_indexes,
+                    alias_key_indexes=alias_key_indexes,
+                )
             continue
-        seen.add(dedupe_key)
         places.append(place)
+        _record_place_dedupe_keys(
+            len(places) - 1,
+            dedupe_keys,
+            primary_key_indexes=primary_key_indexes,
+            alias_key_indexes=alias_key_indexes,
+        )
 
     return places
+
+
+def _place_dedupe_keys(place: Place) -> _PlaceDedupeKeys:
+    primary: set[str] = set()
+    aliases: set[str] = set()
+    if place.google_id:
+        primary.add(f"gid:{place.google_id}")
+    if place.cid is not None:
+        cid_suffix = f"{place.lat:.6f}:{place.lng:.6f}"
+        primary.add(f"cid:{place.cid}:{cid_suffix}")
+        aliases.update(
+            f"cid:{cid_alias}:{cid_suffix}"
+            for cid_alias in place.cid_aliases
+        )
+    if not primary:
+        primary.add(f"name:{place.name}:{place.lat:.6f}:{place.lng:.6f}")
+    return _PlaceDedupeKeys(primary=primary, aliases=aliases)
+
+
+def _duplicate_place_index(
+    keys: _PlaceDedupeKeys,
+    *,
+    primary_key_indexes: dict[str, int],
+    alias_key_indexes: dict[str, int],
+) -> int | None:
+    for key in keys.primary:
+        if key in primary_key_indexes:
+            return primary_key_indexes[key]
+    for key in keys.aliases:
+        if key in primary_key_indexes:
+            return primary_key_indexes[key]
+    for key in keys.primary:
+        if key in alias_key_indexes:
+            return alias_key_indexes[key]
+    return None
+
+
+def _record_place_dedupe_keys(
+    index: int,
+    keys: _PlaceDedupeKeys,
+    *,
+    primary_key_indexes: dict[str, int],
+    alias_key_indexes: dict[str, int],
+) -> None:
+    for key in keys.primary:
+        primary_key_indexes[key] = index
+    for key in keys.aliases:
+        alias_key_indexes[key] = index
+
+
+def _place_dedupe_quality(place: Place) -> tuple[bool, bool, bool, bool]:
+    return (
+        place.google_id is not None,
+        bool(place.cid_aliases),
+        place.cid is not None,
+        place.address is not None,
+    )
 
 
 def _find_place_metadata(ancestors: Sequence[JSONValue]) -> list[JSONValue] | None:
@@ -597,6 +677,19 @@ def _find_cid(node: list[JSONValue] | None) -> str | None:
     return None
 
 
+def _find_cid_aliases(node: list[JSONValue] | None) -> list[str]:
+    if node is None:
+        return []
+    structured_value = _safe_index(node, 6)
+    structured_cid = _find_cid_in_structured_slot(structured_value)
+    if structured_cid is None:
+        return []
+    return _find_cid_aliases_in_structured_slot(
+        structured_value,
+        selected_cid=structured_cid,
+    )
+
+
 def _find_google_id(node: list[JSONValue] | None) -> str | None:
     if node is None:
         return None
@@ -658,6 +751,27 @@ def _find_cid_in_structured_slot(value: JSONValue | None) -> str | None:
     if len(numeric_texts) >= 2:
         return _normalize_cid_token(numeric_texts[1])
     return _normalize_cid_token(numeric_texts[0])
+
+
+def _find_cid_aliases_in_structured_slot(
+    value: JSONValue | None,
+    *,
+    selected_cid: str,
+) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    owner = _parse_list_owner(value)
+    if owner is not None and (owner.photo_url is not None or owner.profile_id is not None):
+        return []
+    aliases: list[str] = []
+    for item in value:
+        text = _clean_text(item)
+        if text is None or _LONG_INTEGER_PATTERN.fullmatch(text) is None:
+            continue
+        alias = _normalize_cid_token(text)
+        if alias is not None and alias != selected_cid and alias not in aliases:
+            aliases.append(alias)
+    return aliases
 
 
 def _find_cid_in_fallback_value(value: JSONValue | None) -> str | None:
