@@ -81,8 +81,8 @@ class Place:
     lng: float
     maps_url: str
     cid: str | None = None
-    cid_aliases: list[str] = field(default_factory=list)
     google_id: str | None = None
+    cid_aliases: list[str] = field(default_factory=list)
     is_favorite: bool = False
     added_by: ListOwner | None = None
 

@@ -428,14 +428,19 @@ def _extract_places(node: JSONValue) -> list[Place]:
             is_favorite=is_favorite,
             added_by=_find_place_added_by(place_record),
         )
-        dedupe_key = (
-            google_id
-            or (f"{cid}:{lat:.6f}:{lng:.6f}" if cid is not None else None)
-            or f"{place.name}:{lat:.6f}:{lng:.6f}"
-        )
-        if dedupe_key in seen:
+        dedupe_keys: set[str]
+        if google_id:
+            dedupe_keys = {f"gid:{google_id}"}
+        elif cid is not None:
+            dedupe_keys = {
+                f"cid:{cid_value}:{lat:.6f}:{lng:.6f}"
+                for cid_value in [cid, *cid_aliases]
+            }
+        else:
+            dedupe_keys = {f"name:{place.name}:{lat:.6f}:{lng:.6f}"}
+        if seen.intersection(dedupe_keys):
             continue
-        seen.add(dedupe_key)
+        seen.update(dedupe_keys)
         places.append(place)
 
     return places

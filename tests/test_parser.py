@@ -333,6 +333,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
         self.assertEqual(parsed.places[1].cid, _HARBOR_CID)
 
+    def test_dedupes_places_with_cid_alias(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        duplicate_place = copy.deepcopy(runtime_state[1][8][0])
+        duplicate_metadata = duplicate_place[1]
+        assert isinstance(duplicate_metadata, list)
+        duplicate_metadata[6] = [_NORTHWIND_CELL_ID]
+        runtime_state[1][8].append(duplicate_place)
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(len(parsed.places), 2)
+        self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
+        self.assertEqual(parsed.places[1].cid, _HARBOR_CID)
+
     def test_keeps_distinct_places_that_share_a_cid(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
         second_place = runtime_state[1][8][1]
