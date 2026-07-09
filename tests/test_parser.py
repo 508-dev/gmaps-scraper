@@ -339,6 +339,7 @@ class ParserTests(unittest.TestCase):
         duplicate_metadata = duplicate_place[1]
         assert isinstance(duplicate_metadata, list)
         duplicate_metadata[6] = [_NORTHWIND_CELL_ID]
+        duplicate_metadata[7] = None
         runtime_state[1][8].append(duplicate_place)
 
         parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)

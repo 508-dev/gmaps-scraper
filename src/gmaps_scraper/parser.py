@@ -428,15 +428,15 @@ def _extract_places(node: JSONValue) -> list[Place]:
             is_favorite=is_favorite,
             added_by=_find_place_added_by(place_record),
         )
-        dedupe_keys: set[str]
+        dedupe_keys: set[str] = set()
         if google_id:
-            dedupe_keys = {f"gid:{google_id}"}
-        elif cid is not None:
-            dedupe_keys = {
+            dedupe_keys.add(f"gid:{google_id}")
+        if cid is not None:
+            dedupe_keys.update({
                 f"cid:{cid_value}:{lat:.6f}:{lng:.6f}"
                 for cid_value in [cid, *cid_aliases]
-            }
-        else:
+            })
+        if not dedupe_keys:
             dedupe_keys = {f"name:{place.name}:{lat:.6f}:{lng:.6f}"}
         if seen.intersection(dedupe_keys):
             continue
@@ -696,7 +696,7 @@ def _find_cid_aliases_in_structured_slot(
         if text is None or _LONG_INTEGER_PATTERN.fullmatch(text) is None:
             continue
         alias = _normalize_cid_token(text)
-        if alias != selected_cid and alias not in aliases:
+        if alias is not None and alias != selected_cid and alias not in aliases:
             aliases.append(alias)
     return aliases
 
