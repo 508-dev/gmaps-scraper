@@ -249,6 +249,37 @@ class ParserTests(unittest.TestCase):
             "https://www.google.com/maps/search/?api=1&query=Northwind+Cafe%2C+Example+District",
         )
 
+    def test_builds_direct_cid_url_when_address_is_missing(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        place_metadata = runtime_state[1][8][0][1]
+        assert isinstance(place_metadata, list)
+        place_metadata[4] = None
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertIsNone(parsed.places[0].address)
+        self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
+        self.assertEqual(
+            parsed.places[0].maps_url,
+            f"https://www.google.com/maps?cid={_NORTHWIND_CID}",
+        )
+
+    def test_builds_name_query_url_when_address_and_cid_are_missing(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        place_metadata = runtime_state[1][8][0][1]
+        assert isinstance(place_metadata, list)
+        place_metadata[4] = None
+        place_metadata[6] = [None]
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertIsNone(parsed.places[0].address)
+        self.assertIsNone(parsed.places[0].cid)
+        self.assertEqual(
+            parsed.places[0].maps_url,
+            "https://www.google.com/maps/search/?api=1&query=Northwind+Cafe",
+        )
+
     def test_uses_fingerprint_not_positive_s2_cell_from_slot_6(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
 

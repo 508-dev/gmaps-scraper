@@ -1184,6 +1184,83 @@ class PlaceScraperTests(unittest.TestCase):
         assert details.diagnostics is not None
         self.assertEqual(details.diagnostics.field_sources.get("category"), "preview")
 
+    def test_build_place_details_prefers_canonical_resolved_url_coordinates(self) -> None:
+        details = _build_place_details_from_snapshot(
+            "https://www.google.com/maps?cid=4015507283657238879",
+            snapshot={
+                "resolved_url": (
+                    "https://www.google.com/maps/place/La+Paix/"
+                    "@50.8500000,4.3600000,17z/"
+                    "data=!4m6!3m5!1s0x0:0x0!8m2!3d50.8511538!4d4.3650878"
+                ),
+                "dom": {
+                    "name": "La Paix",
+                    "address": "Rue Royale 103, 1000 Bruxelles, Belgium",
+                },
+                "preview": {
+                    "lat": 50.901778,
+                    "lng": 4.31745,
+                },
+            },
+            llm_fallback=None,
+            llm_policy="never",
+        )
+
+        self.assertEqual(details.lat, 50.8511538)
+        self.assertEqual(details.lng, 4.3650878)
+        assert details.diagnostics is not None
+        self.assertEqual(details.diagnostics.field_sources.get("lat"), "resolved_url")
+        self.assertEqual(details.diagnostics.field_sources.get("lng"), "resolved_url")
+
+    def test_build_place_details_keeps_preview_coordinates_without_url_coordinates(
+        self,
+    ) -> None:
+        details = _build_place_details_from_snapshot(
+            "https://www.google.com/maps?cid=4015507283657238879",
+            snapshot={
+                "resolved_url": "https://www.google.com/maps/place/La+Paix",
+                "dom": {"name": "La Paix"},
+                "preview": {
+                    "lat": 50.8511538,
+                    "lng": 4.3650878,
+                },
+            },
+            llm_fallback=None,
+            llm_policy="never",
+        )
+
+        self.assertEqual(details.lat, 50.8511538)
+        self.assertEqual(details.lng, 4.3650878)
+        assert details.diagnostics is not None
+        self.assertEqual(details.diagnostics.field_sources.get("lat"), "preview")
+        self.assertEqual(details.diagnostics.field_sources.get("lng"), "preview")
+
+    def test_build_place_details_keeps_preview_coordinates_with_viewport_only_url(
+        self,
+    ) -> None:
+        details = _build_place_details_from_snapshot(
+            "https://www.google.com/maps?cid=4015507283657238879",
+            snapshot={
+                "resolved_url": (
+                    "https://www.google.com/maps/place/La+Paix/"
+                    "@50.901778,4.31745,17z"
+                ),
+                "dom": {"name": "La Paix"},
+                "preview": {
+                    "lat": 50.8511538,
+                    "lng": 4.3650878,
+                },
+            },
+            llm_fallback=None,
+            llm_policy="never",
+        )
+
+        self.assertEqual(details.lat, 50.8511538)
+        self.assertEqual(details.lng, 4.3650878)
+        assert details.diagnostics is not None
+        self.assertEqual(details.diagnostics.field_sources.get("lat"), "preview")
+        self.assertEqual(details.diagnostics.field_sources.get("lng"), "preview")
+
     def test_build_place_details_backfills_preview_rating_summary_sources(self) -> None:
         preview = _extract_preview_place_enrichment(
             (_PREVIEW_FIXTURE_DIR / "rating_review_count.txt").read_text(encoding="utf-8")

@@ -1292,6 +1292,10 @@ def _build_place_details_from_snapshot(
             (preview_snapshot, "preview"),
             (search_result_snapshot, "search_result"),
         )
+    merged_snapshot = _prefer_resolved_place_url_coordinates(
+        merged_snapshot,
+        resolved_url=resolved_url,
+    )
     details = _build_place_details(
         place_url,
         resolved_url=resolved_url,
@@ -1932,6 +1936,27 @@ def _looks_like_google_maps_place_url(value: str) -> bool:
     return parsed.path.startswith("/maps/place/")
 
 
+def _prefer_resolved_place_url_coordinates(
+    snapshot: Mapping[str, object],
+    *,
+    resolved_url: str | None,
+) -> dict[str, object]:
+    coordinates = _extract_canonical_place_coordinates(resolved_url)
+    if coordinates is None:
+        return dict(snapshot)
+
+    merged = dict(snapshot)
+    raw_field_sources = snapshot.get("field_sources")
+    field_sources = (
+        dict(raw_field_sources) if isinstance(raw_field_sources, Mapping) else {}
+    )
+    merged["lat"], merged["lng"] = coordinates
+    field_sources["lat"] = "resolved_url"
+    field_sources["lng"] = "resolved_url"
+    merged["field_sources"] = field_sources
+    return merged
+
+
 def _collect_review_panel_snapshot(page: Any, *, timeout_ms: int) -> dict[str, object]:
     try:
         clicked = page.evaluate(_PLACE_REVIEW_TAB_CLICK_JS)
@@ -2021,12 +2046,16 @@ def _build_place_details(
     category_display_en, category_display_en_source, category_display_en_confidence = (
         _derive_category_display_en(category, snapshot)
     )
-    lat = _parse_float(snapshot.get("lat"))
-    if lat is None:
-        lat = _extract_coordinate_from_url(resolved_url or source_url, index=0)
-    lng = _parse_float(snapshot.get("lng"))
-    if lng is None:
-        lng = _extract_coordinate_from_url(resolved_url or source_url, index=1)
+    canonical_coordinates = _extract_canonical_place_coordinates(resolved_url)
+    if canonical_coordinates is not None:
+        lat, lng = canonical_coordinates
+    else:
+        lat = _parse_float(snapshot.get("lat"))
+        if lat is None:
+            lat = _extract_coordinate_from_url(resolved_url or source_url, index=0)
+        lng = _parse_float(snapshot.get("lng"))
+        if lng is None:
+            lng = _extract_coordinate_from_url(resolved_url or source_url, index=1)
     address = _clean_address_text(snapshot.get("address")) or _extract_address_from_lines(
         combined_lines
     )
@@ -4256,13 +4285,36 @@ def _reservation_provider_label_from_url(url: str) -> str:
 
 
 def _extract_coordinate_from_url(url: str, *, index: int) -> float | None:
-    match = re.search(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)", url)
+    match = re.search(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)", url)
+    if match is None:
+        match = re.search(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)", url)
     if match is None:
         return None
     try:
         return float(match.group(index + 1))
     except ValueError:
         return None
+
+
+def _extract_canonical_place_coordinates(
+    resolved_url: str | None,
+) -> tuple[float, float] | None:
+    if resolved_url is None or not _looks_like_google_maps_place_url(resolved_url):
+        return None
+    match = re.search(
+        r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)",
+        resolved_url,
+    )
+    if match is None:
+        return None
+    try:
+        lat = float(match.group(1))
+        lng = float(match.group(2))
+    except ValueError:
+        return None
+    if not _valid_coordinates(lat, lng):
+        return None
+    return lat, lng
 
 
 def _to_bool(value: object) -> bool:
