@@ -32,6 +32,7 @@ from gmaps_scraper.place_scraper import (
     _merge_llm_place_fields,
     _merge_place_sources,
     _place_detail_values,
+    _prefer_resolved_place_url_coordinates,
     _repair_source_used_llm,
     _should_use_llm_repair,
     collect_place_snapshot,
@@ -654,6 +655,10 @@ def _scrape_place_for_debug(
         snapshot["preview"] if isinstance(snapshot.get("preview"), dict) else {},
     )
     merged_snapshot = _merge_place_sources(dom_snapshot, preview_snapshot)
+    merged_snapshot = _prefer_resolved_place_url_coordinates(
+        merged_snapshot,
+        resolved_url=resolved_url,
+    )
     details = _build_place_details(place_url, resolved_url=resolved_url, snapshot=merged_snapshot)
     evidence = _build_place_llm_evidence(merged_snapshot)
     evidence_hash = _hash_evidence(evidence)

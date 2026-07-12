@@ -428,6 +428,7 @@ def _extract_places(node: JSONValue) -> list[Place]:
                 address=address,
                 lat=lat,
                 lng=lng,
+                cid=cid,
             ),
             cid=cid,
             cid_aliases=cid_aliases,
@@ -833,7 +834,10 @@ def _build_maps_url(
     address: str | None,
     lat: float,
     lng: float,
+    cid: str | None,
 ) -> str:
+    if address is None and cid is not None:
+        return f"https://www.google.com/maps?cid={cid}"
     query = _build_maps_query(name=name, address=address, lat=lat, lng=lng)
     return f"https://www.google.com/maps/search/?{urlencode({'api': '1', 'query': query})}"
 
