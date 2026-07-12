@@ -1261,6 +1261,52 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(details.diagnostics.field_sources.get("lat"), "preview")
         self.assertEqual(details.diagnostics.field_sources.get("lng"), "preview")
 
+    def test_build_place_details_rejects_out_of_range_url_coordinates(
+        self,
+    ) -> None:
+        for resolved_url in (
+            (
+                "https://www.google.com/maps/place/La+Paix/"
+                "@50.8500000,4.3600000,17z/"
+                "data=!4m6!3m5!1s0x0:0x0!8m2!3d950.0!4d4.3650878"
+            ),
+            "https://www.google.com/maps/place/La+Paix/@950.0,4.3600000,17z",
+        ):
+            with self.subTest(resolved_url=resolved_url):
+                details = _build_place_details_from_snapshot(
+                    "https://www.google.com/maps?cid=4015507283657238879",
+                    snapshot={
+                        "resolved_url": resolved_url,
+                        "dom": {"name": "La Paix"},
+                        "preview": {},
+                    },
+                    llm_fallback=None,
+                    llm_policy="never",
+                )
+
+                self.assertIsNone(details.lat)
+                self.assertIsNone(details.lng)
+
+    def test_build_place_details_keeps_valid_viewport_coordinate_fallback(
+        self,
+    ) -> None:
+        details = _build_place_details_from_snapshot(
+            "https://www.google.com/maps?cid=4015507283657238879",
+            snapshot={
+                "resolved_url": (
+                    "https://www.google.com/maps/place/La+Paix/"
+                    "@50.8500000,4.3600000,17z"
+                ),
+                "dom": {"name": "La Paix"},
+                "preview": {},
+            },
+            llm_fallback=None,
+            llm_policy="never",
+        )
+
+        self.assertEqual(details.lat, 50.85)
+        self.assertEqual(details.lng, 4.36)
+
     def test_build_place_details_backfills_preview_rating_summary_sources(self) -> None:
         preview = _extract_preview_place_enrichment(
             (_PREVIEW_FIXTURE_DIR / "rating_review_count.txt").read_text(encoding="utf-8")

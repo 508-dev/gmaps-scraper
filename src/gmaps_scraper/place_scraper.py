@@ -49,6 +49,9 @@ from gmaps_scraper.url_tools import extract_list_id
 
 _TITLE_SELECTORS = ("h1.DUwDvf", "h1.lfPIob", "div[role='main'] h1")
 _TITLE_SELECTOR = ", ".join(_TITLE_SELECTORS)
+_CANONICAL_COORDINATE_PATTERN = re.compile(
+    r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)"
+)
 _PLACE_LLM_PROMPT_VERSION = "gmaps-place-repair-v1"
 _TRANSLATION_MEMORY = TranslationMemory.default()
 type PlaceLLMRepairer = Callable[[PlaceLLMRepairRequest], Mapping[str, object] | None]
@@ -4284,27 +4287,9 @@ def _reservation_provider_label_from_url(url: str) -> str:
     return base.replace("-", " ").replace("_", " ").title()
 
 
-def _extract_coordinate_from_url(url: str, *, index: int) -> float | None:
-    match = re.search(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)", url)
-    if match is None:
-        match = re.search(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)", url)
-    if match is None:
-        return None
-    try:
-        return float(match.group(index + 1))
-    except ValueError:
-        return None
-
-
-def _extract_canonical_place_coordinates(
-    resolved_url: str | None,
+def _validated_coordinate_match(
+    match: re.Match[str] | None,
 ) -> tuple[float, float] | None:
-    if resolved_url is None or not _looks_like_google_maps_place_url(resolved_url):
-        return None
-    match = re.search(
-        r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)",
-        resolved_url,
-    )
     if match is None:
         return None
     try:
@@ -4315,6 +4300,29 @@ def _extract_canonical_place_coordinates(
     if not _valid_coordinates(lat, lng):
         return None
     return lat, lng
+
+
+def _extract_coordinate_from_url(url: str, *, index: int) -> float | None:
+    canonical_match = _CANONICAL_COORDINATE_PATTERN.search(url)
+    if canonical_match is not None:
+        coordinates = _validated_coordinate_match(canonical_match)
+    else:
+        coordinates = _validated_coordinate_match(
+            re.search(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)", url)
+        )
+    if coordinates is None:
+        return None
+    return coordinates[index]
+
+
+def _extract_canonical_place_coordinates(
+    resolved_url: str | None,
+) -> tuple[float, float] | None:
+    if resolved_url is None or not _looks_like_google_maps_place_url(resolved_url):
+        return None
+    return _validated_coordinate_match(
+        _CANONICAL_COORDINATE_PATTERN.search(resolved_url)
+    )
 
 
 def _to_bool(value: object) -> bool:
