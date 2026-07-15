@@ -914,7 +914,12 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(_parse_review_count("1,296"), 1296)
         self.assertEqual(_parse_review_count("1.296"), 1296)
         self.assertEqual(_parse_review_count("3.6K"), 3600)
+        self.assertEqual(_parse_review_count("1.2K"), 1200)
+        self.assertEqual(_parse_review_count("1,2K"), 1200)
+        self.assertEqual(_parse_review_count("1,234"), 1234)
+        self.assertEqual(_parse_review_count("1,234K"), 1234000)
         self.assertEqual(_parse_review_count("9.4万"), 94000)
+        self.assertEqual(_parse_review_count("1,2万"), 12000)
 
     def test_extract_review_count_from_lines_prefers_place_panel_over_related_cards(
         self,
