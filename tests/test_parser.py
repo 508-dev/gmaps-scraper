@@ -868,6 +868,42 @@ class ParserTests(unittest.TestCase):
             {"name": "Name Only Collaborator"},
         )
 
+    def test_accepts_owner_records_with_extra_fields(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        runtime_state[1][3] = [
+            "Extra Field Owner",
+            "https://lh3.googleusercontent.com/a-/extra-field-owner",
+            "104356373423434804635",
+            "ignored_extra_field",
+        ]
+        second_place = runtime_state[1][8][1]
+        assert isinstance(second_place, list)
+        second_place[12] = [
+            "Extra Field Collaborator",
+            "https://lh3.googleusercontent.com/a-/extra-field-collaborator",
+            "205678901234567890123",
+            "another_ignored_field",
+        ]
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(
+            parsed.owner.to_dict() if parsed.owner else None,
+            {
+                "name": "Extra Field Owner",
+                "photo_url": "https://lh3.googleusercontent.com/a-/extra-field-owner",
+                "profile_id": "104356373423434804635",
+            },
+        )
+        self.assertEqual(
+            parsed.places[1].added_by.to_dict() if parsed.places[1].added_by else None,
+            {
+                "name": "Extra Field Collaborator",
+                "photo_url": "https://lh3.googleusercontent.com/a-/extra-field-collaborator",
+                "profile_id": "205678901234567890123",
+            },
+        )
+
     def test_filters_sparse_owner_from_collaborators(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
         first_place = runtime_state[1][8][0]

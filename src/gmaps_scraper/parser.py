@@ -333,7 +333,7 @@ def _extract_additional_list_header_owners(node: list[JSONValue]) -> list[ListOw
     seen: set[tuple[str, str | None, str | None]] = set()
 
     for index, value in enumerate(node):
-        if index in {3, 8}:
+        if index in {0, 3, 8}:
             continue
         for current, _ in _walk_json(value):
             owner = _parse_list_owner(current)
@@ -375,7 +375,7 @@ def _merge_owner_lists(
 
 
 def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
-    if not isinstance(node, list) or len(node) < 1 or len(node) > 3:
+    if not isinstance(node, list) or len(node) < 1:
         return None
 
     name = _clean_text(_safe_index(node, 0))
