@@ -988,6 +988,107 @@ class CliTests(unittest.TestCase):
             ],
         )
 
+    def test_place_kind_batch_fail_on_error_returns_one_on_error(self) -> None:
+        stdout = io.StringIO()
+        details = PlaceDetails(
+            source_url="https://www.google.com/maps/place/Den",
+            resolved_url="https://www.google.com/maps/place/Den",
+            name="Den",
+            category="Japanese restaurant",
+            rating=4.4,
+            review_count=324,
+            address="Tokyo, Japan",
+        )
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "gmaps-scraper",
+                    "--kind",
+                    "place",
+                    "https://www.google.com/maps/place/Den",
+                    "https://www.google.com/maps/place/Narisawa",
+                    "--fail-on-error",
+                ],
+            ),
+            patch(
+                "gmaps_scraper.cli.scrape_places",
+                return_value=[
+                    PlaceScrapeResult(
+                        source_url="https://www.google.com/maps/place/Den",
+                        place=details,
+                        attempts=1,
+                    ),
+                    PlaceScrapeResult(
+                        source_url="https://www.google.com/maps/place/Narisawa",
+                        error="blocked",
+                        attempts=3,
+                    ),
+                ],
+            ) as scrape_places,
+            redirect_stdout(stdout),
+        ):
+            exit_code = main()
+
+        self.assertEqual(exit_code, 1)
+        scrape_places.assert_called_once_with(
+            [
+                "https://www.google.com/maps/place/Den",
+                "https://www.google.com/maps/place/Narisawa",
+            ],
+            headless=True,
+            timeout_ms=30_000,
+            settle_time_ms=3_000,
+            browser_session=None,
+            http_session=None,
+            llm_fallback=None,
+            llm_policy="on_quality_failure",
+            llm_tasks=("dom_repair", "display_translation"),
+            collect_reviews=True,
+            collect_about=True,
+            max_concurrency=1,
+            max_retries=1,
+            retry_backoff_ms=2_000,
+            stagger_ms=0,
+        )
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["results"][0]["place"]["name"], "Den")
+        self.assertEqual(payload["results"][1]["error"], "blocked")
+
+    def test_place_kind_batch_fail_on_error_returns_zero_when_all_succeed(self) -> None:
+        stdout = io.StringIO()
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "gmaps-scraper",
+                    "--kind",
+                    "place",
+                    "https://www.google.com/maps/place/Den",
+                    "https://www.google.com/maps/place/Narisawa",
+                    "--fail-on-error",
+                ],
+            ),
+            patch(
+                "gmaps_scraper.cli.scrape_places",
+                return_value=[
+                    PlaceScrapeResult(
+                        source_url="https://www.google.com/maps/place/Den",
+                        attempts=1,
+                    ),
+                    PlaceScrapeResult(
+                        source_url="https://www.google.com/maps/place/Narisawa",
+                        attempts=1,
+                    ),
+                ],
+            ) as scrape_places,
+            redirect_stdout(stdout),
+        ):
+            exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        scrape_places.assert_called_once()
+
     def test_download_place_photo_writes_bytes(self) -> None:
         details = PlaceDetails(
             source_url="https://www.google.com/maps/place/Den",
