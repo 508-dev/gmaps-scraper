@@ -4142,8 +4142,20 @@ def _parse_review_count(value: object) -> int | None:
     suffix = match.group(2).upper()
     if not suffix and re.fullmatch(r"\d{1,3}(?:[.,\s]\d{3})+", number_text):
         return int(re.sub(r"[.,\s]", "", number_text))
+    cleaned = number_text.replace(" ", "")
+    if suffix and cleaned.count(",") == 1:
+        before, after = cleaned.split(",")
+        # A single comma with 1-2 trailing digits is a European decimal
+        # separator (e.g. "1,2K"); otherwise it is a grouping separator
+        # (e.g. "1,234K").
+        if 1 <= len(after) <= 2:
+            cleaned = before + "." + after
+        else:
+            cleaned = before + after
+    else:
+        cleaned = cleaned.replace(",", "")
     try:
-        number = float(number_text.replace(",", "").replace(" ", ""))
+        number = float(cleaned)
     except ValueError:
         return None
     multiplier = 1
