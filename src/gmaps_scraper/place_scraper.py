@@ -35,6 +35,7 @@ from gmaps_scraper.scraper import (
     HttpSessionConfig,
     ScrapeError,
     _extract_preloaded_fetch_url,
+    _get_with_retry,
     _handle_google_consent,
     _import_curl_requests,
     _launch_browser_context,
@@ -2757,7 +2758,7 @@ def _collect_preview_place_enrichment(
 
     try:
         with curl_requests.Session(**session_kwargs) as session:
-            page_response = session.get(base_url)
+            page_response = _get_with_retry(session, base_url)
             _raise_for_status(page_response)
             page_html = _response_text(page_response)
             preload_url = _extract_preloaded_fetch_url(
@@ -2767,7 +2768,7 @@ def _collect_preview_place_enrichment(
             )
             if preload_url is None:
                 return {}
-            preload_response = session.get(preload_url, referer=base_url)
+            preload_response = _get_with_retry(session, preload_url, referer=base_url)
             _raise_for_status(preload_response)
             payload_text = _response_text(preload_response)
     except Exception:

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import html
 import json
+import random
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from http.cookiejar import LoadError, MozillaCookieJar
 from pathlib import Path
 from typing import Any, Literal, Required, TypedDict
@@ -23,6 +26,10 @@ type CollectionMode = Literal["auto", "curl", "browser"]
 
 _CONSENT_URL_MARKERS = ("consent.google", "consent.youtube")
 _HTTP_IMPERSONATE = "chrome"
+_HTTP_GET_MAX_ATTEMPTS = 3
+_HTTP_GET_BACKOFF_BASE_SECONDS = 1.0
+_HTTP_GET_RETRY_AFTER_MAX_SECONDS = 30.0
+_HTTP_GET_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 DEFAULT_COLLECTION_MODE: CollectionMode = "auto"
 _LINK_TAG_PATTERN = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
 _HTML_ATTRIBUTE_PATTERN = re.compile(
@@ -233,7 +240,7 @@ def collect_http_artifacts(
 
     try:
         with curl_requests.Session(**session_kwargs) as session:
-            response = session.get(list_url)
+            response = _get_with_retry(session, list_url)
             _raise_for_status(response)
             resolved_url = _normalize_response_url(getattr(response, "url", None))
             page_html = _response_text(response)
@@ -245,7 +252,8 @@ def collect_http_artifacts(
             )
             if preload_url is not None:
                 try:
-                    preload_response = session.get(
+                    preload_response = _get_with_retry(
+                        session,
                         preload_url,
                         referer=resolved_url or list_url,
                     )
@@ -618,7 +626,8 @@ def _expand_entitylist_preload_text(
         return None
 
     try:
-        expanded_response = session.get(
+        expanded_response = _get_with_retry(
+            session,
             expanded_preload_url,
             referer=referer,
         )
@@ -699,6 +708,77 @@ def _response_text(response: Any) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _get_with_retry(session: Any, url: str, **kwargs: Any) -> Any:
+    """GET with bounded retries on transient transport errors, 429, and 5xx.
+
+    Only for idempotent reads. The final response or exception is passed through
+    unchanged so callers keep their existing ``_raise_for_status`` handling.
+    """
+    for attempt in range(1, _HTTP_GET_MAX_ATTEMPTS):
+        try:
+            response = session.get(url, **kwargs)
+        except OSError as exc:
+            if not _is_transient_transport_error(exc):
+                raise
+            time.sleep(_http_get_backoff_seconds(attempt))
+            continue
+        if getattr(response, "status_code", None) not in _HTTP_GET_RETRYABLE_STATUS_CODES:
+            return response
+        retry_after = _parse_retry_after_seconds(response)
+        if retry_after is None:
+            time.sleep(_http_get_backoff_seconds(attempt))
+        elif retry_after > _HTTP_GET_RETRY_AFTER_MAX_SECONDS:
+            # Waiting this long would stall auto mode's browser fallback and batch
+            # runs; surface the failure now instead.
+            return response
+        else:
+            time.sleep(retry_after)
+    return session.get(url, **kwargs)
+
+
+def _is_transient_transport_error(exc: OSError) -> bool:
+    # curl_cffi errors subclass OSError; these ones fail the same way on every
+    # attempt (bad URL, TLS verification, redirect loop, proxy config).
+    if isinstance(exc, ValueError):
+        return False
+    try:
+        from curl_cffi.requests import exceptions as curl_exceptions
+    except ImportError:  # pragma: no cover - dependency error path
+        return True
+    permanent = (
+        curl_exceptions.CertificateVerifyError,
+        curl_exceptions.TooManyRedirects,
+        curl_exceptions.ProxyError,
+        curl_exceptions.ImpersonateError,
+        curl_exceptions.SessionClosed,
+    )
+    return not isinstance(exc, permanent)
+
+
+def _http_get_backoff_seconds(attempt: int) -> float:
+    ceiling = _HTTP_GET_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+    return random.uniform(ceiling / 2, ceiling)
+
+
+def _parse_retry_after_seconds(response: Any) -> float | None:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    value = headers.get("Retry-After")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    if value.isascii() and value.isdigit():
+        return float(value)
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=UTC)
+    return max((retry_at - datetime.now(UTC)).total_seconds(), 0.0)
 
 
 def _raise_for_status(response: Any) -> None:
