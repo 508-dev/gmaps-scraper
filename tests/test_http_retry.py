@@ -226,6 +226,16 @@ class ParseRetryAfterTests(unittest.TestCase):
                 response = _Response(headers={"Retry-After": value})
                 self.assertIsNone(_parse_retry_after_seconds(response))
 
+    def test_unparseable_http_date_is_ignored(self) -> None:
+        response = _Response(headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"})
+
+        for error in (TypeError("bad"), ValueError("bad"), OverflowError("bad")):
+            with (
+                self.subTest(error=type(error).__name__),
+                patch("gmaps_scraper.scraper.parsedate_to_datetime", side_effect=error),
+            ):
+                self.assertIsNone(_parse_retry_after_seconds(response))
+
     def test_missing_header_is_ignored(self) -> None:
         self.assertIsNone(_parse_retry_after_seconds(_Response()))
 
