@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
@@ -276,6 +277,42 @@ class CollectorRetryTests(unittest.TestCase):
         self.assertEqual(len(preload_calls), 2)
         for _, kwargs in preload_calls:
             self.assertEqual(kwargs, {"referer": "https://www.google.com/maps/@/data"})
+
+    def test_saved_list_expanded_preload_is_retried_with_its_referer(self) -> None:
+        def entitylist_payload(row_count: int, total_count: int) -> str:
+            candidate: list[object] = [None] * 13
+            candidate[8] = [[None, None, f"Place {index}"] for index in range(row_count)]
+            candidate[12] = total_count
+            return ")]}'\n" + json.dumps([candidate])
+
+        list_html = (
+            "<html><head>"
+            '<link href="/maps/preview/entitylist/getlist?pb=%214i500" as="fetch" rel="preload">'
+            "</head></html>"
+        )
+        expanded_url = "https://www.google.com/maps/preview/entitylist/getlist?pb=%214i4"
+        curl = _CurlRequests(
+            [
+                _Response(text=list_html, url="https://www.google.com/maps/@/data"),
+                _Response(text=entitylist_payload(row_count=2, total_count=4)),
+                _Response(status_code=503),
+                _Response(text=entitylist_payload(row_count=4, total_count=4)),
+            ]
+        )
+
+        with patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl):
+            artifacts = collect_http_artifacts(
+                "https://maps.app.goo.gl/example",
+                timeout_ms=15_000,
+            )
+
+        self.assertEqual(len(artifacts.script_texts), 1)
+        self.assertIn('"Place 3"', artifacts.script_texts[0])
+        expanded_calls = curl.sessions[0].calls[2:]
+        self.assertEqual(
+            expanded_calls,
+            [(expanded_url, {"referer": "https://www.google.com/maps/@/data"})] * 2,
+        )
 
     def test_saved_list_page_still_fails_loudly_after_retries(self) -> None:
         curl = _CurlRequests([_Response(status_code=503) for _ in range(3)])
