@@ -1840,6 +1840,17 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(enrichment["lat"], 35.6731762)
         self.assertEqual(enrichment["lng"], 139.7127216)
         self.assertEqual(enrichment["google_place_id"], "ChIJ8T36HxCLGGARvpARPDyaKLA")
+        self.assertEqual(enrichment["cid"], "7994226410217888392")
+
+    def test_extract_preview_cid_ignores_unrelated_or_ambiguous_entity_tokens(self) -> None:
+        place_id = "ChIJ8T36HxCLGGARvpARPDyaKLA"
+        for payload in (
+            [[place_id], ["0x1:0x2"]],
+            [[place_id, "0x1:0x2"], [place_id, "0x1:0x3"]],
+        ):
+            with self.subTest(payload=payload):
+                enrichment = _extract_preview_place_enrichment(json.dumps(payload))
+                self.assertNotIn("cid", enrichment)
 
     def test_extract_preview_place_enrichment_reads_rating_summary_fixture(self) -> None:
         enrichment = _extract_preview_place_enrichment(
@@ -2648,6 +2659,42 @@ class PlaceScraperTests(unittest.TestCase):
                 ["Floor 1"],
             ],
         )
+
+    def test_place_snapshot_resolves_cid_and_emits_it_as_a_string(self) -> None:
+        source_url = "https://maps.google.com/?cid=5180951040094558101"
+        canonical_url = "https://www.google.com/maps/place/Den/data=!4m3!1s0x1%3A0xffffffffffffffff"
+        cases = (
+            (canonical_url, "7994226410217888392", "18446744073709551615"),
+            ("https://www.google.co.jp/maps?cid=3", None, "3"),
+            ("https://www.google.com/maps/place/Den", "7994226410217888392", "7994226410217888392"),
+            ("https://www.google.com/maps/place/Den", None, "5180951040094558101"),
+        )
+        for resolved_url, preview_cid, expected in cases:
+            with self.subTest(resolved_url=resolved_url, preview_cid=preview_cid):
+                details = _build_place_details_from_snapshot(
+                    source_url,
+                    snapshot={
+                        "resolved_url": resolved_url,
+                        "dom": {},
+                        "preview": {"cid": preview_cid},
+                    },
+                    llm_fallback=None,
+                    llm_policy="never",
+                )
+                self.assertEqual(details.cid, expected)
+                self.assertEqual(details.to_dict()["cid"], expected)
+
+    def test_place_details_omit_invalid_cids(self) -> None:
+        for url in (
+            "https://www.example.com/maps?cid=123",
+            "https://www.google.com/maps?cid=18446744073709551616",
+            "https://www.google.com/maps?cid=123&cid=456",
+            "https://www.google.com/maps/search/?cid=123",
+        ):
+            with self.subTest(url=url):
+                details = _build_place_details(url, resolved_url=url, snapshot={})
+                self.assertIsNone(details.cid)
+                self.assertNotIn("cid", details.to_dict())
 
     def test_build_place_details_preserves_search_result_fields(self) -> None:
         details = _build_place_details(

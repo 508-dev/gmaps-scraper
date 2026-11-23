@@ -49,6 +49,7 @@ from gmaps_scraper.url_tools import extract_list_id
 
 _TITLE_SELECTORS = ("h1.DUwDvf", "h1.lfPIob", "div[role='main'] h1")
 _TITLE_SELECTOR = ", ".join(_TITLE_SELECTORS)
+_GOOGLE_MAPS_HOST_PATTERN = re.compile(r"(?:www\.|maps\.)?google\.[a-z]{2,}(?:\.[a-z]{2,})?")
 _CANONICAL_COORDINATE_PATTERN = re.compile(
     r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)"
 )
@@ -1934,7 +1935,7 @@ def _looks_like_google_maps_place_url(value: str) -> bool:
     if parsed.scheme not in {"http", "https"}:
         return False
     host = (parsed.hostname or "").lower()
-    if re.fullmatch(r"(?:www\.|maps\.)?google\.[a-z]{2,}(?:\.[a-z]{2,})?", host) is None:
+    if _GOOGLE_MAPS_HOST_PATTERN.fullmatch(host) is None:
         return False
     return parsed.path.startswith("/maps/place/")
 
@@ -2098,6 +2099,11 @@ def _build_place_details(
         source_url=source_url,
         resolved_url=resolved_url,
         google_place_id=_normalize_google_place_id(snapshot.get("google_place_id")),
+        cid=(
+            _extract_maps_cid(resolved_url)
+            or _normalize_place_cid(snapshot.get("cid"))
+            or _extract_maps_cid(source_url)
+        ),
         name=name,
         secondary_name=_clean_name_text(snapshot.get("secondary_name"))
         or _extract_secondary_name(combined_lines, name=name),
@@ -2827,6 +2833,9 @@ def _extract_preview_place_enrichment(payload_text: str) -> dict[str, object]:
     google_place_id = _extract_preview_google_place_id(root)
     if google_place_id is not None:
         enrichment["google_place_id"] = google_place_id
+        cid = _extract_preview_cid(root, google_place_id=google_place_id)
+        if cid is not None:
+            enrichment["cid"] = cid
 
     return enrichment
 
@@ -3516,7 +3525,59 @@ def _normalize_google_place_id(value: object) -> str | None:
 
 _GOOGLE_PLACE_ID_PATTERN = re.compile(r"ChIJ[0-9A-Za-z_-]{10,}")
 _MAPS_ENTITY_TOKEN_PATTERN = re.compile(r"0x[0-9a-fA-F]+:0x[0-9a-fA-F]+")
+_MAPS_URL_ENTITY_TOKEN_PATTERN = re.compile(rf"!1s({_MAPS_ENTITY_TOKEN_PATTERN.pattern})(?=!|$)")
 _KNOWLEDGE_GRAPH_MID_PATTERN = re.compile(r"^/m/[A-Za-z0-9_-]+$")
+
+
+def _normalize_place_cid(value: object) -> str | None:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9]{1,20}", value) is None:
+        return None
+    cid = int(value)
+    return str(cid) if 0 < cid < 1 << 64 else None
+
+
+def _cid_from_maps_entity_token(token: str) -> str | None:
+    _, _, low_bits = token.partition(":0x")
+    if not 1 <= len(low_bits) <= 16:
+        return None
+    return _normalize_place_cid(str(int(low_bits, 16)))
+
+
+def _extract_maps_cid(url: str | None) -> str | None:
+    if url is None:
+        return None
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = parsed.hostname or ""
+    if parsed.scheme not in {"http", "https"} or not _GOOGLE_MAPS_HOST_PATTERN.fullmatch(host):
+        return None
+
+    if parsed.path.startswith("/maps/place/"):
+        _, _, data = unquote(parsed.path).partition("/data=")
+        tokens = set(_MAPS_URL_ENTITY_TOKEN_PATTERN.findall(data))
+        if len(tokens) == 1 and (cid := _cid_from_maps_entity_token(tokens.pop())) is not None:
+            return cid
+    elif parsed.path.rstrip("/") != "/maps" and not (
+        host.startswith("maps.google.") and parsed.path in {"", "/"}
+    ):
+        return None
+
+    values = parse_qs(parsed.query, keep_blank_values=True).get("cid", [])
+    return _normalize_place_cid(values[0]) if len(values) == 1 else None
+
+
+def _extract_preview_cid(root: list[object], *, google_place_id: str) -> str | None:
+    candidates = {
+        cid
+        for node in _iter_lists(root)
+        if google_place_id in node
+        for value in node
+        if isinstance(value, str) and _MAPS_ENTITY_TOKEN_PATTERN.fullmatch(value)
+        if (cid := _cid_from_maps_entity_token(value)) is not None
+    }
+    return candidates.pop() if len(candidates) == 1 else None
 
 
 def _extract_preview_google_place_id(root: list[object]) -> str | None:

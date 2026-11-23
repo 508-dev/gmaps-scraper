@@ -329,6 +329,7 @@ class PlaceDetails:
     diagnostics: PlaceExtractionDiagnostics | None = None
     search_result_description: str | None = None
     search_result_url: str | None = None
+    cid: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Convert place details into a JSON-serializable dictionary."""
@@ -336,6 +337,7 @@ class PlaceDetails:
             "source_url": self.source_url,
             "resolved_url": self.resolved_url,
             "google_place_id": self.google_place_id,
+            "cid": self.cid,
             "name": self.name,
             "category": self.category,
             "category_display_en": self.category_display_en,
