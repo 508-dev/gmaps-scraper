@@ -182,18 +182,25 @@ class ParserTests(unittest.TestCase):
         )
         self.assertIsNone(parsed.diagnostics.expected_rows)
 
-    def test_uses_raw_row_count_when_the_parser_deduplicates_places(self) -> None:
-        list_node = copy.deepcopy(_LIST_NODE)
-        list_node[8].append(copy.deepcopy(list_node[8][0]))
-        list_node.extend([None, None, None, 3])
+    def test_flags_fewer_places_than_loaded_rows_after_parsing(self) -> None:
+        for case, extra_row in (
+            ("duplicate", _LIST_NODE[8][0]),
+            ("unparseable", [None, None, "Removed place"]),
+        ):
+            with self.subTest(case=case):
+                list_node = copy.deepcopy(_LIST_NODE)
+                list_node[8].append(copy.deepcopy(extra_row))
+                list_node.extend([None, None, None, 3])
 
-        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=list_node)
+                parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=list_node)
 
-        self.assertEqual(len(parsed.places), 2)
-        assert parsed.diagnostics is not None
-        self.assertEqual(parsed.diagnostics.loaded_rows, 3)
-        self.assertEqual(parsed.diagnostics.expected_rows, 3)
-        self.assertNotIn("partial_payload", parsed.diagnostics.quality_flags)
+                self.assertEqual(len(parsed.places), 2)
+                assert parsed.diagnostics is not None
+                self.assertEqual(parsed.diagnostics.loaded_rows, 3)
+                self.assertEqual(parsed.diagnostics.expected_rows, 3)
+                self.assertEqual(
+                    parsed.diagnostics.quality_flags, ["fewer_places_than_loaded_rows"],
+                )
 
     def test_keeps_header_owner_first_when_collecting_collaborators(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])

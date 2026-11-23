@@ -649,6 +649,45 @@ class HttpArtifactTests(unittest.TestCase):
         self.assertFalse(result.diagnostics.preload_expanded)
         self.assertIn("partial_payload", result.diagnostics.quality_flags)
 
+    def test_paginates_when_a_partial_expanded_preload_introduces_a_cursor(self) -> None:
+        result, calls = self._scrape_entitylist_pages(
+            self._make_entitylist_payload(range(2), 5),
+            self._make_entitylist_payload(range(4), 5, cursor="next"),
+            self._make_entitylist_payload(range(4, 5), 5),
+            page_size=2,
+        )
+
+        self.assertEqual([place.name for place in result.places], [
+            "Place 0", "Place 1", "Place 2", "Place 3", "Place 4",
+        ])
+        self.assertEqual([parse_qs(urlsplit(url).query)["pb"] for url, _ in calls[2:]], [
+            ["!1m1!1slist-id!3e2!4i5!16b1"],
+            ["!1m1!1slist-id!3e2!4i5!5Bnext!16b1"],
+        ])
+        assert result.diagnostics is not None
+        self.assertTrue(result.diagnostics.preload_expanded)
+        self.assertTrue(result.diagnostics.preload_paginated)
+        self.assertEqual(result.diagnostics.loaded_rows, 5)
+        self.assertEqual(result.diagnostics.quality_flags, [])
+
+    def test_does_not_repeat_a_continuation_request_after_preload_expansion(self) -> None:
+        result, calls = self._scrape_entitylist_pages(
+            self._make_entitylist_payload(range(2), 700, cursor="next"),
+            "<html>Try again</html>",
+            self._make_entitylist_payload(range(3), 700, cursor="next"),
+            page_size=600,
+        )
+
+        self.assertEqual([parse_qs(urlsplit(url).query)["pb"] for url, _ in calls[2:]], [
+            ["!1m1!1slist-id!3e2!4i500!5Bnext!16b1"],
+            ["!1m1!1slist-id!3e2!4i500!16b1"],
+        ])
+        self.assertEqual(len(result.places), 3)
+        assert result.diagnostics is not None
+        self.assertTrue(result.diagnostics.preload_expanded)
+        self.assertFalse(result.diagnostics.preload_paginated)
+        self.assertIn("partial_payload", result.diagnostics.quality_flags)
+
     def test_resolves_short_link_when_the_first_request_gets_an_interstitial(self) -> None:
         source_url = "https://maps.app.goo.gl/example"
         canonical_url = "https://www.google.com/maps/placelists/list/list-id"

@@ -137,6 +137,8 @@ def parse_saved_list_artifacts(
         flags.append("missing_cid")
     if counts is not None and counts[0] < counts[1]:
         flags.append("partial_payload")
+    if loaded_rows is not None and len(result.places) < loaded_rows:
+        flags.append("fewer_places_than_loaded_rows")
     result.diagnostics = SavedListExtractionDiagnostics(
         artifact_source=source,
         runtime_state_present=runtime_state is not None,

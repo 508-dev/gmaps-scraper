@@ -703,20 +703,32 @@ def _complete_entitylist_preload(
     if first_page is None or len(first_page.rows) >= first_page.total_rows:
         return preload_text, False, False
 
+    attempted_urls: set[str] = set()
     paginated_text = _paginate_entitylist_preload(
-        session, preload_url=preload_url, first_page=first_page, referer=referer,
+        session,
+        preload_url=preload_url,
+        first_page=first_page,
+        referer=referer,
+        attempted_urls=attempted_urls,
     )
     if paginated_text is not None:
         return paginated_text, False, True
 
-    expanded_text = _expand_entitylist_preload_text(
+    expanded = _expand_entitylist_preload(
         session, preload_url=preload_url, first_page=first_page, referer=referer,
     )
-    return (
-        (expanded_text, True, False)
-        if expanded_text is not None
-        else (preload_text, False, False)
+    if expanded is None:
+        return preload_text, False, False
+
+    expanded_url, expanded_text, expanded_page = expanded
+    paginated_text = _paginate_entitylist_preload(
+        session,
+        preload_url=expanded_url,
+        first_page=expanded_page,
+        referer=referer,
+        attempted_urls=attempted_urls,
     )
+    return paginated_text or expanded_text, True, paginated_text is not None
 
 
 def _paginate_entitylist_preload(
@@ -725,16 +737,18 @@ def _paginate_entitylist_preload(
     preload_url: str,
     first_page: _EntitylistPage,
     referer: str,
+    attempted_urls: set[str],
 ) -> str | None:
+    if first_page.cursor is None or len(first_page.rows) >= first_page.total_rows:
+        return None
     rows = list(first_page.rows)
     seen_rows = {_entitylist_row_key(row) for row in rows}
     cursor = first_page.cursor
-    seen_cursors: set[str] = set()
-    while cursor is not None and cursor not in seen_cursors and len(rows) < first_page.total_rows:
+    while cursor is not None and len(rows) < first_page.total_rows:
         next_url = _entitylist_continuation_url(preload_url, cursor)
-        if next_url is None:
+        if next_url is None or next_url in attempted_urls:
             break
-        seen_cursors.add(cursor)
+        attempted_urls.add(next_url)
 
         text = _fetch_entitylist_text(session, url=next_url, referer=referer)
         page = _parse_entitylist_page(text) if text is not None else None
@@ -762,13 +776,13 @@ def _paginate_entitylist_preload(
     return ")]}'\n" + json.dumps(first_page.payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _expand_entitylist_preload_text(
+def _expand_entitylist_preload(
     session: Any,
     *,
     preload_url: str,
     first_page: _EntitylistPage,
     referer: str,
-) -> str | None:
+) -> tuple[str, str, _EntitylistPage] | None:
     page_size = min(first_page.total_rows, _ENTITYLIST_PAGE_SIZE_LIMIT)
     if page_size <= len(first_page.rows):
         return None
@@ -776,7 +790,9 @@ def _expand_entitylist_preload_text(
     if expanded_url is None or expanded_url == preload_url:
         return None
     text = _fetch_entitylist_text(session, url=expanded_url, referer=referer)
-    expanded = _parse_entitylist_page(text) if text is not None else None
+    if text is None:
+        return None
+    expanded = _parse_entitylist_page(text)
     if (
         expanded is None
         or expanded.list_id != first_page.list_id
@@ -787,7 +803,7 @@ def _expand_entitylist_preload_text(
         )
     ):
         return None
-    return text
+    return expanded_url, text, expanded
 
 
 def _fetch_entitylist_text(session: Any, *, url: str, referer: str) -> str | None:
