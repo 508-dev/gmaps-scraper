@@ -50,10 +50,26 @@ from gmaps_scraper.url_tools import extract_list_id
 
 _TITLE_SELECTORS = ("h1.DUwDvf", "h1.lfPIob", "div[role='main'] h1")
 _TITLE_SELECTOR = ", ".join(_TITLE_SELECTORS)
+# Domain suffixes published at https://www.google.com/supported_domains.
+_GOOGLE_DOMAIN_SUFFIXES = frozenset(
+    """
+    ad ae al am as at az ba be bf bg bi bj bs bt by ca cat cd cf cg ch ci cl cm cn com cv
+    cz de dj dk dm dz ee es fi fm fr ga ge gg gl gm gr gy hn hr ht hu ie im iq is it je jo ki
+    kg kz la li lk lt lu lv md me mg mk ml mn mu mv mw ne nl no nr nu pl pn ps pt ro rs ru rw
+    sc se sh si sk sm sn so sr st td tg tl tm tn to tt vu ws
+    co.ao co.bw co.ck co.cr co.id co.il co.in co.jp co.ke co.kr co.ls co.ma co.mz co.nz
+    co.th co.tz co.ug co.uk co.uz co.ve co.vi co.za co.zm co.zw
+    com.af com.ag com.ar com.au com.bd com.bh com.bn com.bo com.br com.bz com.co com.cu
+    com.cy com.do com.ec com.eg com.et com.fj com.gh com.gi com.gt com.hk com.jm com.kh
+    com.kw com.lb com.ly com.mm com.mt com.mx com.my com.na com.ng com.ni com.np com.om
+    com.pa com.pe com.pg com.ph com.pk com.pr com.py com.qa com.sa com.sb com.sg com.sl
+    com.sv com.tj com.tr com.tw com.ua com.uy com.vc com.vn
+    """.split()
+)
 _CANONICAL_COORDINATE_PATTERN = re.compile(
     r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)"
 )
-_PLACE_LLM_PROMPT_VERSION = "gmaps-place-repair-v1"
+_PLACE_LLM_PROMPT_VERSION = "gmaps-place-repair-v2"
 _TRANSLATION_MEMORY = TranslationMemory.default()
 type PlaceLLMRepairer = Callable[[PlaceLLMRepairRequest], Mapping[str, object] | None]
 type PlaceLLMTask = Literal["dom_repair", "display_translation"]
@@ -1934,10 +1950,17 @@ def _looks_like_google_maps_place_url(value: str) -> bool:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"}:
         return False
-    host = (parsed.hostname or "").lower()
-    if re.fullmatch(r"(?:www\.|maps\.)?google\.[a-z]{2,}(?:\.[a-z]{2,})?", host) is None:
+    if not _is_google_maps_host(parsed.hostname or ""):
         return False
     return parsed.path.startswith("/maps/place/")
+
+
+def _is_google_maps_host(host: str) -> bool:
+    domain = host.removesuffix(".")
+    if domain.startswith(("www.", "maps.")):
+        domain = domain.split(".", 1)[1]
+    label, _, suffix = domain.partition(".")
+    return label == "google" and suffix in _GOOGLE_DOMAIN_SUFFIXES
 
 
 def _prefer_resolved_place_url_coordinates(
@@ -2099,6 +2122,11 @@ def _build_place_details(
         source_url=source_url,
         resolved_url=resolved_url,
         google_place_id=_normalize_google_place_id(snapshot.get("google_place_id")),
+        cid=(
+            _extract_maps_cid(resolved_url)
+            or _normalize_place_cid(snapshot.get("cid"))
+            or _extract_maps_cid(source_url)
+        ),
         name=name,
         secondary_name=_clean_name_text(snapshot.get("secondary_name"))
         or _extract_secondary_name(combined_lines, name=name),
@@ -2283,6 +2311,8 @@ def _merge_llm_place_fields(
         if _is_missing_value(value):
             continue
         if not _is_missing_value(current_fields.get(key)):
+            continue
+        if key == "cid" and _normalize_place_cid(value) is None:
             continue
         if key == "review_topics":
             value = _filter_llm_review_topics_by_evidence(value, snapshot.get("review_topics"))
@@ -2654,6 +2684,7 @@ def _place_detail_values(details: PlaceDetails) -> dict[str, object]:
         "lng": details.lng,
         "limited_view": details.limited_view,
         "google_place_id": details.google_place_id,
+        "cid": details.cid,
         "review_topics": [topic.to_dict() for topic in details.review_topics],
         "reviews": [review.to_dict() for review in details.reviews],
         "about_sections": [section.to_dict() for section in details.about_sections],
@@ -2828,6 +2859,9 @@ def _extract_preview_place_enrichment(payload_text: str) -> dict[str, object]:
     google_place_id = _extract_preview_google_place_id(root)
     if google_place_id is not None:
         enrichment["google_place_id"] = google_place_id
+        cid = _extract_preview_cid(root, google_place_id=google_place_id)
+        if cid is not None:
+            enrichment["cid"] = cid
 
     return enrichment
 
@@ -3517,35 +3551,89 @@ def _normalize_google_place_id(value: object) -> str | None:
 
 _GOOGLE_PLACE_ID_PATTERN = re.compile(r"ChIJ[0-9A-Za-z_-]{10,}")
 _MAPS_ENTITY_TOKEN_PATTERN = re.compile(r"0x[0-9a-fA-F]+:0x[0-9a-fA-F]+")
+_MAPS_URL_ENTITY_TOKEN_PATTERN = re.compile(rf"!1s({_MAPS_ENTITY_TOKEN_PATTERN.pattern})(?=!|$)")
 _KNOWLEDGE_GRAPH_MID_PATTERN = re.compile(r"^/m/[A-Za-z0-9_-]+$")
 
 
+def _normalize_place_cid(value: object) -> str | None:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9]{1,20}", value) is None:
+        return None
+    cid = int(value)
+    return str(cid) if 0 < cid < 1 << 64 else None
+
+
+def _cid_from_maps_entity_token(token: str) -> str | None:
+    _, _, low_bits = token.partition(":0x")
+    if not 1 <= len(low_bits) <= 16:
+        return None
+    return _normalize_place_cid(str(int(low_bits, 16)))
+
+
+def _extract_maps_cid(url: str | None) -> str | None:
+    if url is None:
+        return None
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = parsed.hostname or ""
+    if parsed.scheme not in {"http", "https"} or not _is_google_maps_host(host):
+        return None
+
+    if parsed.path.startswith("/maps/place/"):
+        _, _, data = unquote(parsed.path).partition("/data=")
+        tokens = set(_MAPS_URL_ENTITY_TOKEN_PATTERN.findall(data))
+        if len(tokens) == 1 and (cid := _cid_from_maps_entity_token(tokens.pop())) is not None:
+            return cid
+    elif parsed.path.rstrip("/") != "/maps" and not (
+        host.startswith("maps.google.") and parsed.path in {"", "/"}
+    ):
+        return None
+
+    values = parse_qs(parsed.query, keep_blank_values=True).get("cid", [])
+    return _normalize_place_cid(values[0]) if len(values) == 1 else None
+
+
+def _extract_preview_cid(root: list[object], *, google_place_id: str) -> str | None:
+    candidates = {
+        cid
+        for node in _iter_lists(root)
+        if _preview_place_ids(node) == {google_place_id}
+        for value in node
+        if isinstance(value, str) and _MAPS_ENTITY_TOKEN_PATTERN.fullmatch(value)
+        if (cid := _cid_from_maps_entity_token(value)) is not None
+    }
+    return candidates.pop() if len(candidates) == 1 else None
+
+
+def _preview_place_ids(node: list[object]) -> set[str]:
+    return {
+        value
+        for value in node
+        if isinstance(value, str) and _GOOGLE_PLACE_ID_PATTERN.fullmatch(value)
+    }
+
+
 def _extract_preview_google_place_id(root: list[object]) -> str | None:
-    unique_place_ids: list[str] = []
-    seen_place_ids: set[str] = set()
+    unique_place_ids: set[str] = set()
 
     for node in _iter_lists(root):
-        strings = [value for value in node if isinstance(value, str)]
-        if not strings:
+        place_ids = _preview_place_ids(node)
+        unique_place_ids.update(place_ids)
+        if len(place_ids) != 1:
             continue
 
-        place_ids = [value for value in strings if _GOOGLE_PLACE_ID_PATTERN.fullmatch(value)]
-        if not place_ids:
-            continue
-
-        for place_id in place_ids:
-            if place_id not in seen_place_ids:
-                unique_place_ids.append(place_id)
-                seen_place_ids.add(place_id)
-
-        if any(_MAPS_ENTITY_TOKEN_PATTERN.fullmatch(value) for value in strings) or any(
-            _KNOWLEDGE_GRAPH_MID_PATTERN.fullmatch(value) for value in strings
+        if any(
+            isinstance(value, str)
+            and (
+                _MAPS_ENTITY_TOKEN_PATTERN.fullmatch(value)
+                or _KNOWLEDGE_GRAPH_MID_PATTERN.fullmatch(value)
+            )
+            for value in node
         ):
-            return place_ids[0]
+            return place_ids.pop()
 
-    if len(unique_place_ids) == 1:
-        return unique_place_ids[0]
-    return None
+    return unique_place_ids.pop() if len(unique_place_ids) == 1 else None
 
 
 def _extract_address_parts(value: object) -> AddressParts | None:

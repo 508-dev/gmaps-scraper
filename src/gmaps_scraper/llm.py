@@ -452,6 +452,8 @@ def openai_compatible_place_repair(
             "content": (
                 "You repair Google Maps place extraction from sanitized DOM evidence. "
                 "Return only JSON. Only include fields directly supported by evidence. "
+                "Return a CID as a decimal string only when explicitly identified "
+                "for the selected place in the evidence. "
                 "Do not infer product-specific tags, neighborhoods, or marketing prose. "
                 "Never translate review topic labels. Do not return user-generated "
                 "review text."
