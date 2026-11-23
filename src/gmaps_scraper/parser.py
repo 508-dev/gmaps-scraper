@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from typing import TypeGuard, cast
 from urllib.parse import urlencode
 
-from gmaps_scraper.models import ListOwner, Place, SavedList
+from gmaps_scraper.models import (
+    ListOwner,
+    Place,
+    SavedList,
+    SavedListArtifactSource,
+    SavedListExtractionDiagnostics,
+)
 from gmaps_scraper.url_tools import (
     extract_list_id,
     extract_list_id_from_text,
@@ -21,6 +27,10 @@ type JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
 _XSSI_PREFIX = ")]}'"
 _APP_STATE_PATTERN = re.compile(r"APP_INITIALIZATION_STATE\s*=\s*", re.MULTILINE)
+_SCRIPT_TEXT_PATTERN = re.compile(
+    r"<script\b[^>]*>(.*?)</script\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
 _FAVORITE_MARKERS = frozenset({"❤", "♥", "♥️", "❤️"})
 _LONG_INTEGER_PATTERN = re.compile(r"-?\d{10,}")
 _ADDRESS_HINT_PATTERN = re.compile(
@@ -89,13 +99,13 @@ def parse_saved_list_artifacts(
     script_texts: Sequence[str] = (),
     html: str | None = None,
 ) -> SavedList:
-    """Parse a saved list from browser artifacts."""
+    """Parse a saved list from HTTP or browser artifacts."""
     list_id = extract_list_id(resolved_url or "") or extract_list_id(list_url)
     roots = _collect_roots(runtime_state=runtime_state, script_texts=script_texts, html=html)
-    best_result: SavedList | None = None
+    best_result: tuple[SavedList, SavedListArtifactSource, JSONValue] | None = None
     best_score = -1
 
-    for root in roots:
+    for source, root in roots:
         for candidate in _candidate_nodes(root, list_id=list_id):
             parsed = _parse_candidate_node(
                 list_url,
@@ -109,12 +119,32 @@ def parse_saved_list_artifacts(
             if parsed.description is not None:
                 score += 1
             if score > best_score:
-                best_result = parsed
+                best_result = (parsed, source, candidate.node)
                 best_score = score
 
-    if best_result is None or not best_result.places:
+    if best_result is None or not best_result[0].places:
         raise ParseError("Could not locate a placelist node with parsable places.")
-    return best_result
+
+    result, source, node = best_result
+    counts = _entitylist_row_counts(_find_metadata_node(node))
+    loaded_rows, expected_rows = counts if counts is not None else (None, None)
+    flags: list[str] = []
+    if result.list_id is None:
+        flags.append("missing_list_id")
+    if any(place.address is None for place in result.places):
+        flags.append("missing_address")
+    if any(place.cid is None for place in result.places):
+        flags.append("missing_cid")
+    if counts is not None and counts[0] < counts[1]:
+        flags.append("partial_payload")
+    result.diagnostics = SavedListExtractionDiagnostics(
+        artifact_source=source,
+        runtime_state_present=runtime_state is not None,
+        loaded_rows=loaded_rows,
+        expected_rows=expected_rows,
+        quality_flags=flags,
+    )
+    return result
 
 
 def _collect_roots(
@@ -122,35 +152,49 @@ def _collect_roots(
     runtime_state: JSONValue | None,
     script_texts: Sequence[str],
     html: str | None,
-) -> list[JSONValue]:
-    roots: list[JSONValue] = []
+) -> list[tuple[SavedListArtifactSource, JSONValue]]:
+    roots: list[tuple[SavedListArtifactSource, JSONValue]] = []
     if isinstance(runtime_state, (list, dict)):
-        roots.append(runtime_state)
+        roots.append(("runtime_state", runtime_state))
         for value in _iter_strings(runtime_state):
-            roots.extend(_decode_embedded_json(value))
+            roots.extend(("runtime_state", root) for root in _decode_embedded_json(value))
     elif isinstance(runtime_state, str):
-        roots.extend(_decode_embedded_json(runtime_state))
+        roots.extend(("runtime_state", root) for root in _decode_embedded_json(runtime_state))
 
     for text in script_texts:
-        roots.extend(_decode_embedded_json(text))
+        roots.extend(("script_texts", root) for root in _decode_embedded_json(text))
 
     if html is not None:
-        roots.extend(_decode_embedded_json(html))
+        known_scripts = set(script_texts)
+        for text in _extract_script_texts_from_html(html):
+            if text not in known_scripts:
+                roots.extend(("html", root) for root in _decode_embedded_json(text))
+        roots.extend(("html", root) for root in _decode_embedded_json(html))
 
     return _dedupe_roots(roots)
 
 
-def _dedupe_roots(roots: Iterable[JSONValue]) -> list[JSONValue]:
-    deduped: list[JSONValue] = []
+def _extract_script_texts_from_html(page_html: str) -> list[str]:
+    return [
+        match.group(1)
+        for match in _SCRIPT_TEXT_PATTERN.finditer(page_html)
+        if match.group(1).strip()
+    ]
+
+
+def _dedupe_roots(
+    roots: Iterable[tuple[SavedListArtifactSource, JSONValue]],
+) -> list[tuple[SavedListArtifactSource, JSONValue]]:
+    deduped: list[tuple[SavedListArtifactSource, JSONValue]] = []
     seen_serialized: set[str] = set()
-    for root in roots:
+    for source, root in roots:
         try:
             serialized = json.dumps(root, sort_keys=True)
         except TypeError:
             serialized = repr(root)
         if serialized in seen_serialized:
             continue
-        deduped.append(root)
+        deduped.append((source, root))
         seen_serialized.add(serialized)
     return deduped
 
@@ -326,6 +370,18 @@ def _contains_placelist_signal(node: list[JSONValue]) -> bool:
         if has_placelist_marker(value):
             return True
     return False
+
+
+def _entitylist_row_counts(node: JSONValue | None) -> tuple[int, int] | None:
+    if not isinstance(node, list) or len(node) <= 12:
+        return None
+    # An entitylist header carries the share URL, saved rows, and total row count.
+    if not any(has_placelist_marker(value) for value in _iter_strings(node[2])):
+        return None
+    rows, total = node[8], node[12]
+    if not isinstance(rows, list) or type(total) is not int or total < len(rows):
+        return None
+    return len(rows), total
 
 
 def _extract_additional_list_header_owners(node: list[JSONValue]) -> list[ListOwner]:

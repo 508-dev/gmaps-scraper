@@ -72,7 +72,7 @@ def write_debug_dump(
     ranked_candidates = _rank_candidates(
         list_url,
         resolved_url=resolved_url,
-        roots=roots,
+        roots=[node for _, node in roots],
         list_id=list_id,
     )
 

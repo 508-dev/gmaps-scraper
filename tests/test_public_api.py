@@ -19,6 +19,7 @@ from gmaps_scraper import (
     PlaceScrapeResult,
     ReviewTopic,
     SavedList,
+    SavedListExtractionDiagnostics,
     SavedListScrapeResult,
     ScrapeError,
     build_maps_search_url,
@@ -54,6 +55,7 @@ class PublicApiTests(unittest.TestCase):
         self.assertEqual(PlaceAboutItem.__name__, "PlaceAboutItem")
         self.assertEqual(PlaceAboutSection.__name__, "PlaceAboutSection")
         self.assertEqual(PlaceExtractionDiagnostics.__name__, "PlaceExtractionDiagnostics")
+        self.assertEqual(SavedListExtractionDiagnostics.__name__, "SavedListExtractionDiagnostics")
         self.assertEqual(PlaceLLMRepairRequest.__name__, "PlaceLLMRepairRequest")
         self.assertEqual(PlaceReview.__name__, "PlaceReview")
         self.assertEqual(PlaceScrapeResult.__name__, "PlaceScrapeResult")

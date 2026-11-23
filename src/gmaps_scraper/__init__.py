@@ -24,6 +24,7 @@ from gmaps_scraper.models import (
     PlaceScrapeResult,
     ReviewTopic,
     SavedList,
+    SavedListExtractionDiagnostics,
     SavedListScrapeResult,
 )
 from gmaps_scraper.parser import ParseError, parse_saved_list_artifacts
@@ -78,6 +79,7 @@ __all__ = [
     "PlaceScrapeResult",
     "ReviewTopic",
     "SavedList",
+    "SavedListExtractionDiagnostics",
     "SavedListScrapeResult",
     "ScrapeError",
     "cached_place_repairer",
