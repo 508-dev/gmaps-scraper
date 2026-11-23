@@ -29,6 +29,7 @@ _HTTP_IMPERSONATE = "chrome"
 _HTTP_GET_MAX_ATTEMPTS = 3
 _HTTP_GET_BACKOFF_BASE_SECONDS = 1.0
 _HTTP_GET_RETRY_AFTER_MAX_SECONDS = 30.0
+_HTTP_GET_MIN_TIMEOUT_SECONDS = 0.001
 _HTTP_GET_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 DEFAULT_COLLECTION_MODE: CollectionMode = "auto"
 _LINK_TAG_PATTERN = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
@@ -240,7 +241,7 @@ def collect_http_artifacts(
 
     try:
         with curl_requests.Session(**session_kwargs) as session:
-            response = _get_with_retry(session, list_url)
+            response = _get_with_retry(session, list_url, timeout=timeout_seconds)
             _raise_for_status(response)
             resolved_url = _normalize_response_url(getattr(response, "url", None))
             page_html = _response_text(response)
@@ -255,6 +256,7 @@ def collect_http_artifacts(
                     preload_response = _get_with_retry(
                         session,
                         preload_url,
+                        timeout=timeout_seconds,
                         referer=resolved_url or list_url,
                     )
                     _raise_for_status(preload_response)
@@ -268,6 +270,7 @@ def collect_http_artifacts(
                             preload_url=preload_url,
                             preload_text=preload_text,
                             referer=resolved_url or list_url,
+                            timeout=timeout_seconds,
                         )
                         if expanded_preload_text is not None:
                             preload_text = expanded_preload_text
@@ -612,6 +615,7 @@ def _expand_entitylist_preload_text(
     preload_url: str,
     preload_text: str,
     referer: str,
+    timeout: float,
 ) -> str | None:
     response_counts = _extract_entitylist_response_counts(preload_text)
     if response_counts is None:
@@ -629,6 +633,7 @@ def _expand_entitylist_preload_text(
         expanded_response = _get_with_retry(
             session,
             expanded_preload_url,
+            timeout=timeout,
             referer=referer,
         )
         _raise_for_status(expanded_response)
@@ -710,32 +715,49 @@ def _response_text(response: Any) -> str:
     return str(value)
 
 
-def _get_with_retry(session: Any, url: str, **kwargs: Any) -> Any:
+def _get_with_retry(session: Any, url: str, *, timeout: float, **kwargs: Any) -> Any:
     """GET with bounded retries on transient transport errors, 429, and 5xx.
 
-    Only for idempotent reads. The final response or exception is passed through
-    unchanged so callers keep their existing ``_raise_for_status`` handling.
+    The timeout in seconds includes all attempts and retry delays for this GET.
+    The last response or exception is passed through unchanged.
     """
-    for attempt in range(1, _HTTP_GET_MAX_ATTEMPTS):
+    if timeout < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+        raise TimeoutError("Insufficient time to attempt HTTP GET.")
+    deadline = time.monotonic() + timeout
+    remaining = timeout
+    attempt = 1
+    while True:
         try:
-            response = session.get(url, **kwargs)
+            response = session.get(url, timeout=remaining, **kwargs)
         except OSError as exc:
-            if not _is_transient_transport_error(exc):
+            if attempt == _HTTP_GET_MAX_ATTEMPTS or not _is_transient_transport_error(exc):
                 raise
-            time.sleep(_http_get_backoff_seconds(attempt))
-            continue
-        if getattr(response, "status_code", None) not in _HTTP_GET_RETRYABLE_STATUS_CODES:
-            return response
-        retry_after = _parse_retry_after_seconds(response)
-        if retry_after is None:
-            time.sleep(_http_get_backoff_seconds(attempt))
-        elif retry_after > _HTTP_GET_RETRY_AFTER_MAX_SECONDS:
-            # Waiting this long would stall auto mode's browser fallback and batch
-            # runs; surface the failure now instead.
-            return response
+            remaining = _wait_for_http_retry(deadline, _http_get_backoff_seconds(attempt))
+            if remaining < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+                raise
         else:
-            time.sleep(retry_after)
-    return session.get(url, **kwargs)
+            if (
+                attempt == _HTTP_GET_MAX_ATTEMPTS
+                or getattr(response, "status_code", None) not in _HTTP_GET_RETRYABLE_STATUS_CODES
+            ):
+                return response
+            retry_after = _parse_retry_after_seconds(response)
+            if retry_after is not None and retry_after > _HTTP_GET_RETRY_AFTER_MAX_SECONDS:
+                return response
+            delay = _http_get_backoff_seconds(attempt) if retry_after is None else retry_after
+            remaining = _wait_for_http_retry(deadline, delay)
+            if remaining < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+                return response
+        attempt += 1
+
+
+def _wait_for_http_retry(deadline: float, delay: float) -> float:
+    # curl_cffi converts seconds to integer milliseconds. Zero means no timeout.
+    if deadline - time.monotonic() - delay < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+        return 0.0
+    if delay:
+        time.sleep(delay)
+    return deadline - time.monotonic()
 
 
 def _is_transient_transport_error(exc: OSError) -> bool:
@@ -744,13 +766,16 @@ def _is_transient_transport_error(exc: OSError) -> bool:
     if isinstance(exc, ValueError):
         return False
     try:
+        from curl_cffi import CurlECode
         from curl_cffi.requests import exceptions as curl_exceptions
     except ImportError:  # pragma: no cover - dependency error path
         return True
+    if isinstance(exc, curl_exceptions.ProxyError):
+        # A CONNECT rejection, such as 407, can carry the same receive error code.
+        return exc.code == CurlECode.RECV_ERROR and "proxy connect aborted" in str(exc).lower()
     permanent = (
         curl_exceptions.CertificateVerifyError,
         curl_exceptions.TooManyRedirects,
-        curl_exceptions.ProxyError,
         curl_exceptions.ImpersonateError,
         curl_exceptions.SessionClosed,
     )

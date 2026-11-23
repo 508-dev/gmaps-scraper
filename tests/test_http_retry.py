@@ -7,6 +7,7 @@ from email.utils import format_datetime
 from typing import Any
 from unittest.mock import patch
 
+from curl_cffi import CurlECode
 from curl_cffi.requests import exceptions as curl_exceptions
 
 from gmaps_scraper.place_scraper import _collect_preview_place_enrichment
@@ -86,24 +87,36 @@ _PLACE_PAGE_HTML = (
 
 class GetWithRetryTests(unittest.TestCase):
     def setUp(self) -> None:
-        sleep_patcher = patch("gmaps_scraper.scraper.time.sleep")
+        self.now = 100.0
+        clock_patcher = patch("gmaps_scraper.scraper.time.monotonic", side_effect=lambda: self.now)
+        clock_patcher.start()
+        self.addCleanup(clock_patcher.stop)
+        sleep_patcher = patch("gmaps_scraper.scraper.time.sleep", side_effect=self.advance_clock)
         self.sleep = sleep_patcher.start()
         self.addCleanup(sleep_patcher.stop)
+
+    def advance_clock(self, seconds: float) -> None:
+        self.now += seconds
 
     def test_success_is_returned_without_retrying(self) -> None:
         ok = _Response(status_code=200)
         session = _Session([ok])
 
-        self.assertIs(_get_with_retry(session, "https://example.test/a", referer="r"), ok)
+        self.assertIs(
+            _get_with_retry(session, "https://example.test/a", timeout=5.0, referer="r"),
+            ok,
+        )
 
-        self.assertEqual(session.calls, [("https://example.test/a", {"referer": "r"})])
+        self.assertEqual(
+            session.calls, [("https://example.test/a", {"timeout": 5.0, "referer": "r"})]
+        )
         self.sleep.assert_not_called()
 
     def test_non_retryable_error_status_is_returned_without_retrying(self) -> None:
         not_found = _Response(status_code=404)
         session = _Session([not_found])
 
-        self.assertIs(_get_with_retry(session, "https://example.test/a"), not_found)
+        self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=5.0), not_found)
 
         self.assertEqual(len(session.calls), 1)
         self.sleep.assert_not_called()
@@ -118,23 +131,24 @@ class GetWithRetryTests(unittest.TestCase):
             "gmaps_scraper.scraper.random.uniform",
             side_effect=lambda low, high: high,
         ) as uniform:
-            self.assertIs(_get_with_retry(session, "https://example.test/a"), ok)
+            self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=5.0), ok)
 
         self.assertEqual(len(session.calls), 3)
+        self.assertEqual([kwargs["timeout"] for _, kwargs in session.calls], [5.0, 4.0, 2.0])
         self.assertEqual([call.args[0] for call in self.sleep.call_args_list], [1.0, 2.0])
         self.assertEqual([call.args for call in uniform.call_args_list], [(0.5, 1.0), (1.0, 2.0)])
 
     def test_retry_after_seconds_overrides_backoff(self) -> None:
         session = _Session([_Response(status_code=429, headers={"Retry-After": "7"}), _Response()])
 
-        _get_with_retry(session, "https://example.test/a")
+        _get_with_retry(session, "https://example.test/a", timeout=10.0)
 
         self.sleep.assert_called_once_with(7.0)
 
     def test_retry_after_at_the_cap_is_honored(self) -> None:
         session = _Session([_Response(status_code=503, headers={"Retry-After": "30"}), _Response()])
 
-        _get_with_retry(session, "https://example.test/a")
+        _get_with_retry(session, "https://example.test/a", timeout=35.0)
 
         self.sleep.assert_called_once_with(30.0)
 
@@ -142,10 +156,43 @@ class GetWithRetryTests(unittest.TestCase):
         blocked = _Response(status_code=429, headers={"Retry-After": "120"})
         session = _Session([blocked])
 
-        self.assertIs(_get_with_retry(session, "https://example.test/a"), blocked)
+        self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=200.0), blocked)
 
         self.assertEqual(len(session.calls), 1)
         self.sleep.assert_not_called()
+
+    def test_retry_after_exceeding_remaining_timeout_skips_sleep_and_retry(self) -> None:
+        blocked = _Response(status_code=429, headers={"Retry-After": "30"})
+        session = _Session([blocked])
+
+        self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=5.0), blocked)
+        self.assertEqual(len(session.calls), 1)
+        self.sleep.assert_not_called()
+
+    def test_requests_and_retry_after_delays_consume_the_same_budget(self) -> None:
+        initial = _Response(status_code=429, headers={"Retry-After": "2"})
+        last = _Response(status_code=429, headers={"Retry-After": "2"})
+        session = _Session([initial, last])
+        get = session.get
+
+        def slow_get(url: str, **kwargs: Any) -> _Response:
+            self.advance_clock(1.0)
+            return get(url, **kwargs)
+
+        with patch.object(session, "get", side_effect=slow_get):
+            self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=5.0), last)
+
+        self.assertEqual([kwargs["timeout"] for _, kwargs in session.calls], [5.0, 2.0])
+        self.sleep.assert_called_once_with(2.0)
+
+    def test_curl_is_never_called_with_a_submillisecond_retry_timeout(self) -> None:
+        retryable = _Response(status_code=503, headers={"Retry-After": "1"})
+        session = _Session([retryable])
+        self.sleep.side_effect = lambda delay: self.advance_clock(delay + 0.9995)
+
+        self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=2.0), retryable)
+        self.assertEqual(len(session.calls), 1)
+        self.sleep.assert_called_once_with(1.0)
 
     def test_transient_transport_errors_are_retried(self) -> None:
         for error in (
@@ -153,13 +200,14 @@ class GetWithRetryTests(unittest.TestCase):
             curl_exceptions.Timeout("operation timed out"),
             curl_exceptions.DNSError("could not resolve host"),
             curl_exceptions.SSLError("tls handshake failed"),
+            curl_exceptions.ProxyError("Proxy CONNECT aborted", CurlECode.RECV_ERROR),
         ):
             with self.subTest(error=type(error).__name__):
                 self.sleep.reset_mock()
                 ok = _Response()
                 session = _Session([error, ok])
 
-                self.assertIs(_get_with_retry(session, "https://example.test/a"), ok)
+                self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=5.0), ok)
 
                 self.assertEqual(len(session.calls), 2)
                 self.sleep.assert_called_once()
@@ -169,14 +217,16 @@ class GetWithRetryTests(unittest.TestCase):
             curl_exceptions.InvalidURL("bad url"),
             curl_exceptions.CertificateVerifyError("self-signed certificate"),
             curl_exceptions.TooManyRedirects("redirect loop"),
-            curl_exceptions.ProxyError("proxy auth failed"),
+            curl_exceptions.ProxyError("CONNECT tunnel failed, response 407", CurlECode.RECV_ERROR),
+            curl_exceptions.ProxyError("Could not resolve proxy", CurlECode.COULDNT_RESOLVE_PROXY),
+            curl_exceptions.ProxyError("proxy auth failed", CurlECode.PROXY),
             TypeError("unexpected keyword argument"),
         ):
             with self.subTest(error=type(error).__name__):
                 session = _Session([error, _Response()])
 
                 with self.assertRaises(type(error)):
-                    _get_with_retry(session, "https://example.test/a")
+                    _get_with_retry(session, "https://example.test/a", timeout=5.0)
 
                 self.assertEqual(len(session.calls), 1)
                 self.sleep.assert_not_called()
@@ -191,7 +241,7 @@ class GetWithRetryTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(curl_exceptions.Timeout, "t3"):
-            _get_with_retry(session, "https://example.test/a")
+            _get_with_retry(session, "https://example.test/a", timeout=5.0)
 
         self.assertEqual(len(session.calls), 3)
 
@@ -199,7 +249,7 @@ class GetWithRetryTests(unittest.TestCase):
         last = _Response(status_code=503)
         session = _Session([_Response(status_code=503), _Response(status_code=503), last])
 
-        self.assertIs(_get_with_retry(session, "https://example.test/a"), last)
+        self.assertIs(_get_with_retry(session, "https://example.test/a", timeout=5.0), last)
 
         self.assertEqual(len(session.calls), 3)
         self.assertEqual(self.sleep.call_count, 2)
@@ -286,7 +336,7 @@ class CollectorRetryTests(unittest.TestCase):
         preload_calls = curl.sessions[0].calls[1:]
         self.assertEqual(len(preload_calls), 2)
         for _, kwargs in preload_calls:
-            self.assertEqual(kwargs, {"referer": "https://www.google.com/maps/@/data"})
+            self.assertEqual(kwargs["referer"], "https://www.google.com/maps/@/data")
 
     def test_saved_list_expanded_preload_is_retried_with_its_referer(self) -> None:
         def entitylist_payload(row_count: int, total_count: int) -> str:
@@ -320,8 +370,8 @@ class CollectorRetryTests(unittest.TestCase):
         self.assertIn('"Place 3"', artifacts.script_texts[0])
         expanded_calls = curl.sessions[0].calls[2:]
         self.assertEqual(
-            expanded_calls,
-            [(expanded_url, {"referer": "https://www.google.com/maps/@/data"})] * 2,
+            [(url, kwargs["referer"]) for url, kwargs in expanded_calls],
+            [(expanded_url, "https://www.google.com/maps/@/data")] * 2,
         )
 
     def test_saved_list_page_still_fails_loudly_after_retries(self) -> None:
@@ -334,6 +384,21 @@ class CollectorRetryTests(unittest.TestCase):
             collect_http_artifacts("https://maps.app.goo.gl/example", timeout_ms=15_000)
 
         self.assertEqual(len(curl.sessions[0].calls), 3)
+
+    def test_saved_list_page_applies_configured_timeout_to_retry_delays(self) -> None:
+        curl = _CurlRequests([_Response(status_code=429, headers={"Retry-After": "30"})])
+
+        with (
+            patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl),
+            self.assertRaisesRegex(ScrapeError, "HTTP 429"),
+        ):
+            collect_http_artifacts("https://maps.app.goo.gl/example", timeout_ms=5_000)
+
+        self.assertEqual(
+            curl.sessions[0].calls,
+            [("https://maps.app.goo.gl/example", {"timeout": 5.0})],
+        )
+        self.sleep.assert_not_called()
 
     def test_place_preview_enrichment_recovers_from_transient_failures(self) -> None:
         curl = _CurlRequests(

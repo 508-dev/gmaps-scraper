@@ -53,10 +53,11 @@ uv run gmaps-scraper URL --fetch-mode browser
 - `browser` uses only the browser path.
 
 HTTP requests (the saved-list fetch and the place preview enrichment) retry up
-to three attempts on connection errors, timeouts, HTTP 429, and 500/502/503/504,
-with exponential backoff and jitter. A `Retry-After` of up to 30 seconds is
-honored; a longer one fails the request immediately so `auto` mode can fall back
-to the browser without stalling.
+to three attempts on transient connection errors, timeouts, HTTP 429, and
+500/502/503/504, with exponential backoff and jitter. Each GET shares
+`--timeout-ms` across its attempts and delays, with a one-second minimum.
+The request stops retrying when a delay would exhaust that budget or when
+`Retry-After` exceeds 30 seconds.
 
 Place scraping currently uses the browser path.
 
