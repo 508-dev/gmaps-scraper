@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 import time
 from collections.abc import Sequence
@@ -14,12 +15,16 @@ from pathlib import Path
 from typing import Any, Literal, Required, TypedDict
 from urllib.parse import urljoin
 
+from gmaps_scraper._logging import url_log_fields
 from gmaps_scraper.browser_humanization import (
     BrowserWindowSize,
     resolve_browser_window_size,
 )
 from gmaps_scraper.models import SavedList, SavedListScrapeResult
 from gmaps_scraper.parser import JSONValue, ParseError, parse_saved_list_artifacts
+
+_logger = logging.getLogger(__name__)
+
 
 type CollectionMode = Literal["auto", "curl", "browser"]
 
@@ -188,6 +193,12 @@ def collect_saved_list_result(
 ) -> tuple[BrowserArtifacts, SavedList]:
     """Collect artifacts and parse a Google Maps saved list."""
     normalized_mode = _normalize_collection_mode(collection_mode)
+    _logger.info(
+        "Starting saved-list collection mode=%s timeout_ms=%s",
+        normalized_mode,
+        timeout_ms,
+        extra=url_log_fields(list_url),
+    )
 
     if normalized_mode == "browser":
         artifacts = collect_browser_artifacts(
@@ -223,7 +234,12 @@ def collect_saved_list_result(
             list_url,
             artifacts=artifacts,
         )
-    except (ParseError, ScrapeError):
+    except (ParseError, ScrapeError) as exc:
+        _logger.warning(
+            "Falling back to saved-list browser collection error_type=%s",
+            type(exc).__name__,
+            extra=url_log_fields(list_url),
+        )
         artifacts = collect_browser_artifacts(
             list_url,
             headless=headless,
@@ -242,13 +258,15 @@ def _parse_saved_list(
     *,
     artifacts: BrowserArtifacts,
 ) -> SavedList:
-    return parse_saved_list_artifacts(
+    result = parse_saved_list_artifacts(
         list_url,
         resolved_url=artifacts.resolved_url,
         runtime_state=artifacts.runtime_state,
         script_texts=artifacts.script_texts,
         html=artifacts.html,
     )
+    _logger.info("Parsed saved list", extra=url_log_fields(list_url, artifacts.resolved_url))
+    return result
 
 
 def collect_http_artifacts(
@@ -291,8 +309,12 @@ def collect_http_artifacts(
                         referer=resolved_url or list_url,
                     )
                     _raise_for_status(preload_response)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _logger.warning(
+                        "Saved-list preload fetch failed error_type=%s",
+                        type(exc).__name__,
+                        extra=url_log_fields(list_url, resolved_url),
+                    )
                 else:
                     preload_text = _response_text(preload_response)
                     if preload_text.strip():
@@ -305,7 +327,12 @@ def collect_http_artifacts(
                         if expanded_preload_text is not None:
                             preload_text = expanded_preload_text
                         script_texts.append(preload_text)
-    except Exception as exc:  # pragma: no cover - network error path
+    except Exception as exc:
+        _logger.warning(
+            "Saved-list HTTP collection failed error_type=%s",
+            type(exc).__name__,
+            extra=url_log_fields(list_url),
+        )
         raise ScrapeError(f"Failed to collect HTTP artifacts: {exc}") from exc
     finally:
         _save_http_cookie_jar(http_session, cookie_jar)
@@ -426,12 +453,16 @@ def _handle_google_consent(page: Any, *, timeout_ms: int) -> None:
     for _ in range(2):
         if not _has_google_consent_screen(page):
             return
+        _logger.debug("Detected Google consent screen")
         if _click_button_in_contexts(page, _REJECT_BUTTON_LABELS):
+            _logger.debug("Selected Reject all on Google consent screen")
             _settle_after_consent(page, timeout_ms=timeout_ms)
             continue
         if _click_button_in_contexts(page, _MORE_OPTIONS_BUTTON_LABELS):
+            _logger.debug("Opened More options on Google consent screen")
             page.wait_for_timeout(500)
             if _click_button_in_contexts(page, _REJECT_BUTTON_LABELS):
+                _logger.debug("Selected Reject all from Google consent options")
                 _settle_after_consent(page, timeout_ms=timeout_ms)
                 continue
         break
@@ -439,6 +470,7 @@ def _handle_google_consent(page: Any, *, timeout_ms: int) -> None:
     if not _has_google_consent_screen(page):
         return
 
+    _logger.error("Could not dismiss Google consent screen")
     diagnostics = _capture_consent_diagnostics(page)
     details = ", ".join(str(path) for path in diagnostics)
     raise ScrapeError(
@@ -588,6 +620,7 @@ def _load_http_cookie_jar(
         try:
             cookie_jar.load(ignore_discard=True, ignore_expires=True)
         except LoadError as exc:
+            _logger.warning("Failed to load HTTP cookie jar error_type=%s", type(exc).__name__)
             raise ScrapeError(
                 f"Failed to load HTTP cookie jar: {http_session.cookie_jar_path}"
             ) from exc

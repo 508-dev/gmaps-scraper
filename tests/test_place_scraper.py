@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from decimal import localcontext
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from gmaps_scraper.models import (
     PlaceExtractionDiagnostics,
@@ -1081,6 +1081,62 @@ class PlaceScraperTests(unittest.TestCase):
                 },
             ],
         )
+
+    def test_place_repair_failure_preserves_details_and_logs_error_type(self) -> None:
+        place_url = "https://www.google.com/maps/place/Den"
+        repair = Mock(side_effect=RuntimeError("synthetic private response"))
+        with self.assertLogs("gmaps_scraper.place_scraper", level="WARNING") as logs:
+            details = _build_place_details_from_snapshot(
+                place_url,
+                snapshot={"resolved_url": place_url, "dom": {"name": "Den"}},
+                llm_fallback=repair,
+                llm_policy="always",
+            )
+
+        self.assertEqual(details.name, "Den")
+        assert details.diagnostics is not None
+        self.assertFalse(details.diagnostics.llm_used)
+        self.assertEqual(details.diagnostics.llm_error, "synthetic private response")
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("synthetic private response", logs.output[0])
+
+    def test_invalid_place_llm_policy_is_rejected_before_repair(self) -> None:
+        repair = Mock()
+        with self.assertRaisesRegex(ValueError, "Unsupported llm_policy: invalid"):
+            _build_place_details_from_snapshot(
+                "https://www.google.com/maps/place/Den",
+                snapshot={"dom": {"name": "Den"}},
+                llm_fallback=repair,
+                llm_policy="invalid",
+            )
+        repair.assert_not_called()
+
+    def test_preview_network_failure_preserves_the_browser_snapshot(self) -> None:
+        place_url = "https://www.google.com/maps/place/Den"
+        context = Mock()
+        page = context.new_page.return_value
+        page.url = place_url
+        page.evaluate.side_effect = (
+            lambda script: {"name": "Den"} if script == _PLACE_JS_EXTRACTOR else False
+        )
+        curl_requests = MagicMock()
+        session = curl_requests.Session.return_value.__enter__.return_value
+        session.get.side_effect = ConnectionError("synthetic private response")
+        with (
+            patch("gmaps_scraper.place_scraper._launch_browser_context", return_value=context),
+            patch("gmaps_scraper.place_scraper._handle_google_consent"),
+            patch("gmaps_scraper.place_scraper._import_curl_requests", return_value=curl_requests),
+            self.assertLogs("gmaps_scraper.place_scraper", level="WARNING") as logs,
+        ):
+            snapshot = collect_place_snapshot(
+                place_url, collect_reviews=False, collect_about=False
+            )
+
+        self.assertEqual(snapshot["dom"], {"name": "Den"})
+        self.assertEqual(snapshot["preview"], {})
+        self.assertIn("ConnectionError", logs.output[0])
+        self.assertNotIn("synthetic private response", logs.output[0])
+        session.get.assert_called_once_with(place_url)
 
     def test_llm_policy_uses_repair_only_for_quality_failures(self) -> None:
         self.assertFalse(

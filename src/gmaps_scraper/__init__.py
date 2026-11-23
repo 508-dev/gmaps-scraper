@@ -1,5 +1,7 @@
 """Google Maps scraping helpers."""
 
+import logging
+
 from gmaps_scraper.display_fields import (
     PlaceDisplayFieldRepairer,
     repair_place_display_fields,
@@ -56,6 +58,8 @@ from gmaps_scraper.url_tools import (
     has_placelist_marker,
     localize_maps_url,
 )
+
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     "PLACELIST_URL_MARKER",

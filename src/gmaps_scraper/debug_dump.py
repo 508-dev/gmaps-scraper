@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from gmaps_scraper._logging import url_log_fields
 from gmaps_scraper.models import PlaceDetails, PlaceExtractionDiagnostics
 from gmaps_scraper.parser import (
     JSONValue,
@@ -42,6 +44,9 @@ class _PlaceEntry:
     lat: float
     lng: float
     strings: list[str]
+
+
+_logger = logging.getLogger(__name__)
 
 
 def write_debug_dump(
@@ -151,6 +156,7 @@ def write_debug_dump(
     }
     summary_path = output_dir / "summary.json"
     _write_json(summary_path, summary)
+    _logger.debug("Wrote saved-list debug artifacts", extra=url_log_fields(list_url, resolved_url))
     return summary_path
 
 
@@ -198,6 +204,7 @@ def write_place_debug_dump(
     }
     summary_path = output_dir / "summary.json"
     _write_json(summary_path, summary)
+    _logger.debug("Wrote place debug artifacts", extra=url_log_fields(place_url, resolved_url))
     return summary_path
 
 

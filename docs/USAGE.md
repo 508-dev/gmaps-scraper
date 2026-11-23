@@ -123,7 +123,12 @@ Parallel workers get separate browser profile subdirectories under
 when the goal is a single long-lived browser identity. Use higher concurrency
 when separate worker session state is acceptable.
 
-## Debug Artifacts
+## Logs and Debug Artifacts
+
+Use `--log-level INFO` to see scraper activity on stderr while stdout remains
+JSON. `DEBUG` adds details about browser operations and consent handling.
+URL hashes correlate events for the same input and resolved URL.
+Python callers can configure loggers under `gmaps_scraper` with standard logging.
 
 Write place debug artifacts and a compact selector recipe:
 
