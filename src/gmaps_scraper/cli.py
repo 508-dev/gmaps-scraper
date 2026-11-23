@@ -182,6 +182,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="For batch place scraping, delay starts between URLs or workers.",
     )
     parser.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help=(
+            "For batch place scraping, return a non-zero exit code when any "
+            "place fails to scrape."
+        ),
+    )
+    parser.add_argument(
         "--llm-repair",
         action="store_true",
         help=(
@@ -348,6 +356,10 @@ def main() -> int:
                 args.output.write_text(f"{payload}\n", encoding="utf-8")
             else:
                 print(payload)
+            if args.fail_on_error and any(
+                result.error is not None for result in batch_results
+            ):
+                return 1
             return 0
         if (
             args.download_photo is not None
