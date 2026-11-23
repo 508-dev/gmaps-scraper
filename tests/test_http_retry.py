@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from typing import Any
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from curl_cffi import CurlECode
 from curl_cffi.requests import exceptions as curl_exceptions
 
+from gmaps_scraper._logging import url_log_fields
 from gmaps_scraper.place_scraper import _collect_preview_place_enrichment
 from gmaps_scraper.scraper import (
     ScrapeError,
@@ -83,6 +85,19 @@ _LIST_PAGE_HTML = (
 _PLACE_PAGE_HTML = (
     '<html><head><link href="/maps/preview/place?pb=456" as="fetch" rel="preload"></head></html>'
 )
+_ENTITYLIST_PAGE_HTML = (
+    '<link href="/maps/preview/entitylist/getlist?pb=%213e2%214i2" as="fetch" rel="preload">'
+)
+_LIST_URL = "https://www.google.com/maps/placelists/list/list-id"
+
+
+def _entitylist_payload(indexes: range, total_count: int, cursor: str = "") -> str:
+    candidate: list[object] = [None] * 13
+    candidate[0] = ["list-id"]
+    candidate[2] = [_LIST_URL]
+    candidate[8] = [[None, None, f"Place {index}"] for index in indexes]
+    candidate[12] = total_count
+    return ")]}'\n" + json.dumps([candidate, cursor])
 
 
 class GetWithRetryTests(unittest.TestCase):
@@ -212,6 +227,21 @@ class GetWithRetryTests(unittest.TestCase):
                 self.assertEqual(len(session.calls), 2)
                 self.sleep.assert_called_once()
 
+    def test_retry_log_correlates_requests_without_raw_url_or_error_details(self) -> None:
+        url = "https://example.test/placelists/list/private-list-id"
+        error_detail = "proxy message containing private configuration"
+        session = _Session([curl_exceptions.ConnectionError(error_detail), _Response()])
+
+        with self.assertLogs("gmaps_scraper.scraper", level="WARNING") as logs:
+            _get_with_retry(session, url, timeout=5.0)
+
+        (record,) = logs.records
+        self.assertIn("attempt=2", record.getMessage())
+        self.assertIn("reason=ConnectionError", record.getMessage())
+        self.assertNotIn(url, record.getMessage())
+        self.assertNotIn(error_detail, record.getMessage())
+        self.assertEqual(record.source_url_hash, url_log_fields(url)["source_url_hash"])
+
     def test_permanent_errors_are_raised_without_retrying(self) -> None:
         for error in (
             curl_exceptions.InvalidURL("bad url"),
@@ -339,24 +369,13 @@ class CollectorRetryTests(unittest.TestCase):
             self.assertEqual(kwargs["referer"], "https://www.google.com/maps/@/data")
 
     def test_saved_list_expanded_preload_is_retried_with_its_referer(self) -> None:
-        def entitylist_payload(row_count: int, total_count: int) -> str:
-            candidate: list[object] = [None] * 13
-            candidate[8] = [[None, None, f"Place {index}"] for index in range(row_count)]
-            candidate[12] = total_count
-            return ")]}'\n" + json.dumps([candidate])
-
-        list_html = (
-            "<html><head>"
-            '<link href="/maps/preview/entitylist/getlist?pb=%214i500" as="fetch" rel="preload">'
-            "</head></html>"
-        )
-        expanded_url = "https://www.google.com/maps/preview/entitylist/getlist?pb=%214i4"
+        expanded_url = "https://www.google.com/maps/preview/entitylist/getlist?pb=%213e2%214i4"
         curl = _CurlRequests(
             [
-                _Response(text=list_html, url="https://www.google.com/maps/@/data"),
-                _Response(text=entitylist_payload(row_count=2, total_count=4)),
+                _Response(text=_ENTITYLIST_PAGE_HTML, url=_LIST_URL),
+                _Response(text=_entitylist_payload(range(2), total_count=4)),
                 _Response(status_code=503),
-                _Response(text=entitylist_payload(row_count=4, total_count=4)),
+                _Response(text=_entitylist_payload(range(4), total_count=4)),
             ]
         )
 
@@ -368,11 +387,86 @@ class CollectorRetryTests(unittest.TestCase):
 
         self.assertEqual(len(artifacts.script_texts), 1)
         self.assertIn('"Place 3"', artifacts.script_texts[0])
+        self.assertTrue(artifacts.preload_expanded)
+        self.assertFalse(artifacts.preload_paginated)
         expanded_calls = curl.sessions[0].calls[2:]
         self.assertEqual(
             [(url, kwargs["referer"]) for url, kwargs in expanded_calls],
-            [(expanded_url, "https://www.google.com/maps/@/data")] * 2,
+            [(expanded_url, _LIST_URL)] * 2,
         )
+
+    def test_saved_list_continuation_is_retried_with_its_referer(self) -> None:
+        curl = _CurlRequests([
+            _Response(text=_ENTITYLIST_PAGE_HTML, url=_LIST_URL),
+            _Response(text=_entitylist_payload(range(2), total_count=4, cursor="next")),
+            _Response(status_code=503),
+            _Response(text=_entitylist_payload(range(2, 4), total_count=4)),
+        ])
+
+        with patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl):
+            artifacts = collect_http_artifacts(_LIST_URL, timeout_ms=5_000)
+
+        self.assertFalse(artifacts.preload_expanded)
+        self.assertTrue(artifacts.preload_paginated)
+        payload = json.loads(artifacts.script_texts[0][4:])
+        self.assertEqual([row[2] for row in payload[0][8]], [
+            "Place 0", "Place 1", "Place 2", "Place 3",
+        ])
+        calls = curl.sessions[0].calls[2:]
+        self.assertEqual(len(calls), 2)
+        for url, kwargs in calls:
+            self.assertEqual(parse_qs(urlsplit(url).query)["pb"], ["!3e2!4i2!5Bnext"])
+            self.assertEqual(kwargs["referer"], _LIST_URL)
+
+    def test_saved_list_continuations_share_the_completion_budget(self) -> None:
+        blocked = _Response(status_code=429, headers={"Retry-After": "2"})
+        curl = _CurlRequests([
+            _Response(text=_ENTITYLIST_PAGE_HTML, url=_LIST_URL),
+            _Response(text=_entitylist_payload(range(2), total_count=6, cursor="next")),
+            blocked,
+            blocked,
+            _Response(text=_entitylist_payload(range(2, 4), total_count=6, cursor="last")),
+            blocked,
+        ])
+        now = 100.0
+
+        def advance_clock(seconds: float) -> None:
+            nonlocal now
+            now += seconds
+
+        self.sleep.side_effect = advance_clock
+        with (
+            patch("gmaps_scraper.scraper.time.monotonic", side_effect=lambda: now),
+            patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl),
+        ):
+            artifacts = collect_http_artifacts(_LIST_URL, timeout_ms=5_000)
+
+        calls = curl.sessions[0].calls[2:]
+        self.assertEqual([kwargs["timeout"] for _, kwargs in calls], [5.0, 3.0, 1.0, 1.0])
+        self.assertEqual(self.sleep.call_count, 2)
+        self.assertTrue(artifacts.preload_paginated)
+        self.assertFalse(artifacts.preload_expanded)
+        payload = json.loads(artifacts.script_texts[0][4:])
+        self.assertEqual((len(payload[0][8]), payload[0][12]), (4, 6))
+
+    def test_saved_list_canonical_page_is_retried_after_a_short_link(self) -> None:
+        source_url = "https://maps.app.goo.gl/example"
+        curl = _CurlRequests([
+            _Response(text="Opening Maps", url=source_url),
+            _Response(status_code=503),
+            _Response(text="canonical page", url=_LIST_URL),
+        ])
+
+        with (
+            patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl),
+            patch("gmaps_scraper.scraper._resolve_saved_list_short_link", return_value=_LIST_URL),
+        ):
+            artifacts = collect_http_artifacts(source_url, timeout_ms=5_000)
+
+        self.assertEqual(artifacts.resolved_url, _LIST_URL)
+        self.assertEqual([url for url, _ in curl.sessions[0].calls], [
+            source_url, _LIST_URL, _LIST_URL,
+        ])
 
     def test_saved_list_page_still_fails_loudly_after_retries(self) -> None:
         curl = _CurlRequests([_Response(status_code=503) for _ in range(3)])
