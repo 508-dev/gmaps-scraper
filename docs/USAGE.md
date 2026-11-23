@@ -105,6 +105,12 @@ uv run gmaps-scraper \
   --output place-results.json
 ```
 
+For overview refreshes, `--skip-preview-if-dom-complete` avoids an extra HTTP
+request when a full place view already supplies a name, address, phone, website,
+and coordinates from the view or the canonical URL. Preview-only fields can be
+absent in that mode. The Python functions `scrape_place()`, `scrape_places()`,
+and `collect_place_snapshot()` accept `skip_preview_if_dom_complete=True`.
+
 Browser sessions use a weighted random desktop viewport by default. Persistent
 profile sessions keep a stable viewport for that profile path. Use
 `--disable-random-window-size` when you need CloakBrowser's default viewport,
@@ -144,12 +150,6 @@ Reviews tab. Use `--skip-about` when About-panel attributes are not needed.
 Skipping Reviews still preserves any review-count/topic evidence present on the
 overview page, but it will not expand the Reviews tab for more topics or visible
 review snippets.
-
-For overview refreshes, `--skip-preview-if-dom-complete` avoids an extra HTTP
-request when a full place view already supplies a name, address, phone, website,
-and coordinates from the view or the canonical URL. Preview-only fields can be
-absent in that mode. The Python functions `scrape_place()`, `scrape_places()`,
-and `collect_place_snapshot()` accept `skip_preview_if_dom_complete=True`.
 
 ## Optional LLM Repair
 
