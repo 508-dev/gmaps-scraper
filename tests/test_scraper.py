@@ -9,7 +9,7 @@ from http.cookiejar import Cookie, LoadError
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import Mock, call, patch
 
 from gmaps_scraper.models import SavedList
 from gmaps_scraper.parser import ParseError
@@ -446,7 +446,7 @@ class HttpArtifactTests(unittest.TestCase):
     def test_primary_http_failure_is_wrapped_and_logs_only_safe_context(self) -> None:
         source_url = "https://maps.app.goo.gl/example?token=private-value"
         failure = ConnectionError("connection failed with private-value")
-        curl_requests = MagicMock()
+        curl_requests = unittest.mock.MagicMock()
         session = curl_requests.Session.return_value.__enter__.return_value
         session.get.side_effect = failure
         with (

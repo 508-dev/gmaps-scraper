@@ -258,15 +258,13 @@ def _parse_saved_list(
     *,
     artifacts: BrowserArtifacts,
 ) -> SavedList:
-    result = parse_saved_list_artifacts(
+    return parse_saved_list_artifacts(
         list_url,
         resolved_url=artifacts.resolved_url,
         runtime_state=artifacts.runtime_state,
         script_texts=artifacts.script_texts,
         html=artifacts.html,
     )
-    _logger.info("Parsed saved list", extra=url_log_fields(list_url, artifacts.resolved_url))
-    return result
 
 
 def collect_http_artifacts(
@@ -337,6 +335,9 @@ def collect_http_artifacts(
     finally:
         _save_http_cookie_jar(http_session, cookie_jar)
 
+    _logger.debug(
+        "Collected saved-list HTTP artifacts", extra=url_log_fields(list_url, resolved_url)
+    )
     return BrowserArtifacts(
         resolved_url=resolved_url,
         runtime_state=None,
@@ -378,6 +379,9 @@ def collect_browser_artifacts(
     finally:
         context.close()
 
+    _logger.debug(
+        "Collected saved-list browser artifacts", extra=url_log_fields(list_url, resolved_url)
+    )
     return BrowserArtifacts(
         resolved_url=resolved_url,
         runtime_state=runtime_state,
