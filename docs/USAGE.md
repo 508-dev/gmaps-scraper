@@ -64,9 +64,9 @@ Pass URLs as positional arguments, through `--input`, or both.
 | `--debug-output-dir PATH` | Off | Write raw extraction artifacts for a single URL to this directory. |
 | `--screenshot-output-dir PATH` | Off | Write place-page screenshots to this directory. |
 | `--input PATH` | Unset | Append URLs from a newline-delimited file, or use `-` for standard input. |
-| `--max-concurrency N` | `1` | Set the number of place batch workers. |
-| `--max-retries N` | `1` | Set the number of retries per place in a batch. |
-| `--retry-backoff-ms MS` | `2000` | Set the place batch retry delay multiplier in milliseconds. |
+| `--max-concurrency N` | `1` | Set the number of batch workers. |
+| `--max-retries N` | `0` for lists, `1` for places | Set the number of retries per URL in a batch. |
+| `--retry-backoff-ms MS` | `2000` | Set the initial batch retry delay in milliseconds. Successive delays increase linearly. |
 | `--stagger-ms MS` | `0` | Delay starts between batch URLs or place workers. |
 | `--fail-on-error` | Off | Write batch results, then exit with status `1` if any URL failed. |
 | `--llm-repair` | Off | Enable optional OpenAI-compatible LLM repair for places. |
@@ -87,7 +87,7 @@ cookies used by the HTTP client.
 
 `--timeout-ms` controls operations such as browser navigation and HTTP requests.
 `--settle-ms` adds a browser-only wait. Batch runs also include any delays from
-`--stagger-ms` and place retries.
+`--stagger-ms` and retries.
 
 ## Fetch Modes
 
