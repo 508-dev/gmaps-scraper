@@ -424,6 +424,7 @@ class ScraperConsentTests(unittest.TestCase):
 
 class HttpArtifactTests(unittest.TestCase):
     def test_collect_http_artifacts_fetches_preloaded_payload(self) -> None:
+        script_text = '\n  window.APP_INITIALIZATION_STATE=["A &amp; B"];\n'
         fake_requests = _FakeCurlRequests(
             responses=[
                 _FakeHttpResponse(
@@ -431,7 +432,9 @@ class HttpArtifactTests(unittest.TestCase):
                         "<html><head>"
                         '<link href="/maps/preview/entitylist/getlist?pb=123" '
                         'as="fetch" rel="preload">'
-                        '<script>window.APP_INITIALIZATION_STATE=["inline"];</script>'
+                        '<!-- Example: <script>document.title = "Map";</script> -->'
+                        f'<SCRIPT data-label="2 > 1">{script_text}</SCRIPT>'
+                        "<script> \n </script>"
                         "</head></html>"
                     ),
                     url="https://www.google.com/maps/@/data=!3m1!4b1",
@@ -456,7 +459,7 @@ class HttpArtifactTests(unittest.TestCase):
         self.assertEqual(artifacts.resolved_url, "https://www.google.com/maps/@/data=!3m1!4b1")
         self.assertEqual(
             artifacts.script_texts,
-            ['window.APP_INITIALIZATION_STATE=["inline"];', ")]}'\n[[\"payload\"]]"],
+            [script_text, ")]}'\n[[\"payload\"]]"],
         )
         self.assertIn("/maps/preview/entitylist/getlist?pb=123", artifacts.html)
 

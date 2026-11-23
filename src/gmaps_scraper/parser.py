@@ -6,7 +6,8 @@ import json
 import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import TypeGuard, cast
+from html.parser import HTMLParser
+from typing import TypeGuard, cast, override
 from urllib.parse import urlencode
 
 from gmaps_scraper.models import (
@@ -27,10 +28,6 @@ type JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
 _XSSI_PREFIX = ")]}'"
 _APP_STATE_PATTERN = re.compile(r"APP_INITIALIZATION_STATE\s*=\s*", re.MULTILINE)
-_SCRIPT_TEXT_PATTERN = re.compile(
-    r"<script\b[^>]*>(.*?)</script\s*>",
-    re.IGNORECASE | re.DOTALL,
-)
 _FAVORITE_MARKERS = frozenset({"❤", "♥", "♥️", "❤️"})
 _LONG_INTEGER_PATTERN = re.compile(r"-?\d{10,}")
 _ADDRESS_HINT_PATTERN = re.compile(
@@ -177,11 +174,35 @@ def _collect_roots(
 
 
 def _extract_script_texts_from_html(page_html: str) -> list[str]:
-    return [
-        match.group(1)
-        for match in _SCRIPT_TEXT_PATTERN.finditer(page_html)
-        if match.group(1).strip()
-    ]
+    parser = _ScriptTextParser()
+    parser.feed(page_html)
+    parser.close()
+    return parser.scripts
+
+
+class _ScriptTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._parts: list[str] | None = None
+
+    @override
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script":
+            self._parts = []
+
+    @override
+    def handle_data(self, data: str) -> None:
+        if self._parts is not None:
+            self._parts.append(data)
+
+    @override
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._parts is not None:
+            text = "".join(self._parts)
+            if text.strip():
+                self.scripts.append(text)
+            self._parts = None
 
 
 def _dedupe_roots(
