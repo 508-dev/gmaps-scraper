@@ -50,6 +50,7 @@ Pass URLs as positional arguments, through `--input`, or both.
 | `-h`, `--help` | Off | Print CLI help and exit. |
 | `--kind {list,place}` | `list` | Select saved-list or place scraping. |
 | `--output PATH` | Standard output | Write JSON to a file. |
+| `--log-level {DEBUG,INFO,WARNING,ERROR}` | Off | Write scraper logs at the selected level to standard error. |
 | `--download-photo PATH` | Off | Download the representative photo for a single place. |
 | `--download-main-photo PATH` | Off | Download the main photo for a single place. |
 | `--show-browser-window`, `--headed` | Off | Show the browser window. |
