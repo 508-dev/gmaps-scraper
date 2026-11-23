@@ -145,6 +145,12 @@ Skipping Reviews still preserves any review-count/topic evidence present on the
 overview page, but it will not expand the Reviews tab for more topics or visible
 review snippets.
 
+For overview refreshes, `--skip-preview-if-dom-complete` avoids an extra HTTP
+request when a full place view already supplies a name, address, phone, website,
+and coordinates from the view or the canonical URL. Preview-only fields can be
+absent in that mode. The Python functions `scrape_place()`, `scrape_places()`,
+and `collect_place_snapshot()` accept `skip_preview_if_dom_complete=True`.
+
 ## Optional LLM Repair
 
 LLM repair is opt-in. Deterministic DOM and preview extraction always run first.

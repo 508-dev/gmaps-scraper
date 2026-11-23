@@ -1165,6 +1165,7 @@ def scrape_place(
     llm_tasks: Sequence[PlaceLLMTask] = _DEFAULT_LLM_TASKS,
     collect_reviews: bool = True,
     collect_about: bool = True,
+    skip_preview_if_dom_complete: bool = False,
     screenshot_path: Path | None = None,
     overview_screenshot_path: Path | None = None,
 ) -> PlaceDetails:
@@ -1184,6 +1185,7 @@ def scrape_place(
         http_session=http_session,
         collect_reviews=collect_reviews,
         collect_about=collect_about,
+        skip_preview_if_dom_complete=skip_preview_if_dom_complete,
         screenshot_path=screenshot_path,
         overview_screenshot_path=overview_screenshot_path,
     )
@@ -1209,6 +1211,7 @@ def scrape_places(
     llm_tasks: Sequence[PlaceLLMTask] = _DEFAULT_LLM_TASKS,
     collect_reviews: bool = True,
     collect_about: bool = True,
+    skip_preview_if_dom_complete: bool = False,
     max_concurrency: int = 1,
     max_retries: int = 1,
     retry_backoff_ms: int = 2_000,
@@ -1242,6 +1245,7 @@ def scrape_places(
             llm_tasks=llm_tasks,
             collect_reviews=collect_reviews,
             collect_about=collect_about,
+            skip_preview_if_dom_complete=skip_preview_if_dom_complete,
             max_retries=max_retries,
             retry_backoff_ms=retry_backoff_ms,
             stagger_ms=stagger_ms,
@@ -1261,6 +1265,7 @@ def scrape_places(
         llm_tasks=llm_tasks,
         collect_reviews=collect_reviews,
         collect_about=collect_about,
+        skip_preview_if_dom_complete=skip_preview_if_dom_complete,
         max_concurrency=max_concurrency,
         max_retries=max_retries,
         retry_backoff_ms=retry_backoff_ms,
@@ -1396,6 +1401,7 @@ def _scrape_places_sequential(
     llm_tasks: Sequence[PlaceLLMTask],
     collect_reviews: bool,
     collect_about: bool,
+    skip_preview_if_dom_complete: bool = False,
     max_retries: int,
     retry_backoff_ms: int,
     stagger_ms: int,
@@ -1423,6 +1429,7 @@ def _scrape_places_sequential(
                     llm_tasks=llm_tasks,
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
+                    skip_preview_if_dom_complete=skip_preview_if_dom_complete,
                     max_retries=max_retries,
                     retry_backoff_ms=retry_backoff_ms,
                     retry_quality_flags=retry_quality_flags,
@@ -1456,6 +1463,7 @@ def _scrape_places_parallel(
     llm_tasks: Sequence[PlaceLLMTask],
     collect_reviews: bool,
     collect_about: bool,
+    skip_preview_if_dom_complete: bool = False,
     max_concurrency: int,
     max_retries: int,
     retry_backoff_ms: int,
@@ -1496,6 +1504,7 @@ def _scrape_places_parallel(
             llm_tasks=llm_tasks,
             collect_reviews=collect_reviews,
             collect_about=collect_about,
+            skip_preview_if_dom_complete=skip_preview_if_dom_complete,
             max_retries=max_retries,
             retry_backoff_ms=retry_backoff_ms,
             stagger_ms=stagger_ms,
@@ -1574,6 +1583,7 @@ def _scrape_place_with_context_and_retries(
     llm_tasks: Sequence[PlaceLLMTask],
     collect_reviews: bool,
     collect_about: bool,
+    skip_preview_if_dom_complete: bool = False,
     max_retries: int,
     retry_backoff_ms: int,
     retry_quality_flags: Sequence[str],
@@ -1594,6 +1604,7 @@ def _scrape_place_with_context_and_retries(
                 http_session=http_session,
                 collect_reviews=collect_reviews,
                 collect_about=collect_about,
+                skip_preview_if_dom_complete=skip_preview_if_dom_complete,
                 screenshot_path=screenshot_path,
                 overview_screenshot_path=overview_screenshot_path,
             )
@@ -1647,6 +1658,7 @@ def collect_place_snapshot(
     http_session: HttpSessionConfig | None = None,
     collect_reviews: bool = True,
     collect_about: bool = True,
+    skip_preview_if_dom_complete: bool = False,
     screenshot_path: Path | None = None,
     overview_screenshot_path: Path | None = None,
 ) -> dict[str, object]:
@@ -1664,6 +1676,7 @@ def collect_place_snapshot(
             http_session=http_session,
             collect_reviews=collect_reviews,
             collect_about=collect_about,
+            skip_preview_if_dom_complete=skip_preview_if_dom_complete,
             screenshot_path=screenshot_path,
             overview_screenshot_path=overview_screenshot_path,
         )
@@ -1680,6 +1693,7 @@ def _collect_place_snapshot_with_context(
     http_session: HttpSessionConfig | None,
     collect_reviews: bool,
     collect_about: bool,
+    skip_preview_if_dom_complete: bool = False,
     screenshot_path: Path | None,
     overview_screenshot_path: Path | None,
 ) -> dict[str, object]:
@@ -1729,12 +1743,19 @@ def _collect_place_snapshot_with_context(
             about_snapshot = _collect_about_panel_snapshot(page, timeout_ms=timeout_ms)
             if about_snapshot:
                 dom_snapshot = {**dom_snapshot, **about_snapshot}
-        preview_snapshot = _collect_preview_place_enrichment(
-            place_url,
-            resolved_url=resolved_url,
-            timeout_ms=timeout_ms,
-            http_session=http_session,
+        preview_skipped = (
+            skip_preview_if_dom_complete
+            and isinstance(dom_snapshot, Mapping)
+            and _has_complete_place_overview(dom_snapshot, resolved_url=resolved_url)
         )
+        preview_snapshot: dict[str, object] = {}
+        if not preview_skipped:
+            preview_snapshot = _collect_preview_place_enrichment(
+                place_url,
+                resolved_url=resolved_url,
+                timeout_ms=timeout_ms,
+                http_session=http_session,
+            )
     except Exception as exc:  # pragma: no cover - browser error path
         raise ScrapeError(f"Failed to scrape place page: {exc}") from exc
     finally:
@@ -1751,7 +1772,34 @@ def _collect_place_snapshot_with_context(
         "dom": dict(dom_snapshot),
         "search_result": search_result_snapshot or {},
         "preview": preview_snapshot,
+        "preview_skipped": preview_skipped,
     }
+
+
+def _has_complete_place_overview(
+    snapshot: Mapping[str, object],
+    *,
+    resolved_url: str | None,
+) -> bool:
+    if not resolved_url or not _looks_like_google_maps_place_url(resolved_url):
+        return False
+    if _to_bool(snapshot.get("limited_view")):
+        return False
+
+    name = _clean_structured_name_text(snapshot.get("name"))
+    return (
+        name is not None
+        and not _looks_like_ui_action_label(name)
+        and _clean_address_text(snapshot.get("address")) is not None
+        and _normalize_phone_candidate(snapshot.get("phone")) is not None
+        and _normalize_website(snapshot.get("website")) is not None
+        and (
+            _extract_canonical_place_coordinates(resolved_url) is not None
+            or _valid_coordinates(
+                _parse_float(snapshot.get("lat")), _parse_float(snapshot.get("lng"))
+            )
+        )
+    )
 
 
 def _place_screenshot_path(

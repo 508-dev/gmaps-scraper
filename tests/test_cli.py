@@ -386,6 +386,7 @@ class CliTests(unittest.TestCase):
             llm_tasks=("dom_repair", "display_translation"),
             collect_reviews=True,
             collect_about=True,
+            skip_preview_if_dom_complete=False,
         )
         collect_saved_list_result.assert_not_called()
 
@@ -645,6 +646,7 @@ class CliTests(unittest.TestCase):
             llm_tasks=("dom_repair", "display_translation"),
             collect_reviews=True,
             collect_about=True,
+            skip_preview_if_dom_complete=False,
         )
 
     def test_place_kind_can_enable_llm_repair_from_env(self) -> None:
@@ -698,6 +700,7 @@ class CliTests(unittest.TestCase):
             llm_tasks=("dom_repair", "display_translation"),
             collect_reviews=True,
             collect_about=True,
+            skip_preview_if_dom_complete=False,
         )
 
     def test_place_kind_can_scope_llm_tasks_and_skip_tabs(self) -> None:
@@ -726,6 +729,7 @@ class CliTests(unittest.TestCase):
                     "display_translation",
                     "--skip-reviews",
                     "--skip-about",
+                    "--skip-preview-if-dom-complete",
                 ],
             ),
             patch(
@@ -744,6 +748,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertFalse(scrape_place.call_args.kwargs["collect_reviews"])
         self.assertFalse(scrape_place.call_args.kwargs["collect_about"])
+        self.assertTrue(scrape_place.call_args.kwargs["skip_preview_if_dom_complete"])
 
     def test_place_kind_uses_env_file_model_for_llm_cache_namespace(self) -> None:
         stdout = io.StringIO()
@@ -967,6 +972,7 @@ class CliTests(unittest.TestCase):
             llm_tasks=("dom_repair", "display_translation"),
             collect_reviews=True,
             collect_about=True,
+            skip_preview_if_dom_complete=False,
             max_concurrency=1,
             max_retries=2,
             retry_backoff_ms=750,
@@ -1022,6 +1028,7 @@ class CliTests(unittest.TestCase):
             llm_tasks=("dom_repair", "display_translation"),
             collect_reviews=True,
             collect_about=True,
+            skip_preview_if_dom_complete=False,
             max_concurrency=1,
             max_retries=1,
             retry_backoff_ms=2_000,
@@ -1136,6 +1143,7 @@ class CliTests(unittest.TestCase):
             llm_tasks=("dom_repair", "display_translation"),
             collect_reviews=True,
             collect_about=True,
+            skip_preview_if_dom_complete=False,
             max_concurrency=1,
             max_retries=1,
             retry_backoff_ms=2_000,
