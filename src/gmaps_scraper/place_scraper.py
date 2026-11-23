@@ -25,6 +25,7 @@ from gmaps_scraper.models import (
     PlaceDetails,
     PlaceExtractionDiagnostics,
     PlaceLLMRepairRequest,
+    PlaceOpeningHours,
     PlaceReservationLink,
     PlaceReview,
     PlaceScrapeResult,
@@ -2118,6 +2119,7 @@ def _build_place_details(
         address_display_en_confidence=address_display_en_confidence,
         located_in=_clean_text(snapshot.get("located_in")),
         status=_clean_text(snapshot.get("status")) or _extract_status_from_lines(combined_lines),
+        opening_hours=_normalize_opening_hours(snapshot.get("opening_hours")),
         website=_normalize_website(snapshot.get("website")),
         reservation_links=_normalize_reservation_links(snapshot.get("reservation_links")),
         phone=_normalize_phone_candidate(snapshot.get("phone"))
@@ -2573,6 +2575,9 @@ def _build_place_diagnostics(
     raw_address = _clean_text(snapshot.get("address"))
     if raw_address is not None and details.address is None:
         quality_flags.append("address_rejected")
+
+    if not details.opening_hours and not _is_missing_value(snapshot.get("opening_hours")):
+        quality_flags.append("opening_hours_incomplete")
 
     raw_name = _clean_text(snapshot.get("name"))
     if (
@@ -3649,6 +3654,33 @@ def _normalize_review_topics(value: object) -> list[ReviewTopic]:
         ):
             topics[existing_index] = topic
     return topics
+
+
+def _normalize_opening_hours(value: object) -> list[PlaceOpeningHours]:
+    if not isinstance(value, list) or len(value) != 7:
+        return []
+    schedule: list[PlaceOpeningHours] = []
+    seen_days: set[str] = set()
+    for row in value:
+        if not isinstance(row, Mapping):
+            return []
+        day = _clean_text(row.get("day"))
+        raw_hours = row.get("hours")
+        if day is None or day.casefold() in seen_days or not isinstance(raw_hours, list):
+            return []
+        hours = [item.strip() for item in raw_hours if isinstance(item, str) and item.strip()]
+        if not hours or len(hours) != len(raw_hours):
+            return []
+        is_open_24h = None
+        if len(hours) == 1:
+            label = " ".join(hours[0].casefold().split())
+            if label in {"open 24 hours", "24 時間営業", "24時間営業"}:
+                is_open_24h = True
+            elif label in {"closed", "定休日"}:
+                is_open_24h = False
+        seen_days.add(day.casefold())
+        schedule.append(PlaceOpeningHours(day=day, hours=hours, is_open_24h=is_open_24h))
+    return schedule
 
 
 def _normalize_about_sections(value: object) -> list[PlaceAboutSection]:

@@ -15,6 +15,7 @@ from gmaps_scraper import (
     PlaceDetails,
     PlaceExtractionDiagnostics,
     PlaceLLMRepairRequest,
+    PlaceOpeningHours,
     PlaceReview,
     PlaceScrapeResult,
     ReviewTopic,
@@ -55,6 +56,7 @@ class PublicApiTests(unittest.TestCase):
         self.assertEqual(PlaceAboutSection.__name__, "PlaceAboutSection")
         self.assertEqual(PlaceExtractionDiagnostics.__name__, "PlaceExtractionDiagnostics")
         self.assertEqual(PlaceLLMRepairRequest.__name__, "PlaceLLMRepairRequest")
+        self.assertEqual(PlaceOpeningHours.__name__, "PlaceOpeningHours")
         self.assertEqual(PlaceReview.__name__, "PlaceReview")
         self.assertEqual(PlaceScrapeResult.__name__, "PlaceScrapeResult")
         self.assertEqual(SavedListScrapeResult.__name__, "SavedListScrapeResult")

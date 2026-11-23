@@ -839,6 +839,19 @@
     }
     return null;
   };
+  const openingHours = () => {
+    if (!panelInfo.found || !panelInfo.title || isSearchResultTitle(panelInfo.title)) {
+      return [];
+    }
+    // Maps renders the weekly rows even when the Overview hours control is collapsed.
+    const table = panel.querySelector("div.OqCZI table.eK4R0e");
+    return Array.from(table?.querySelectorAll("tr.y0skZc") || [], (row) => ({
+      day: row.querySelector("td.ylH6lf > div")?.textContent?.trim(),
+      hours: Array.from(row.querySelectorAll("td.mxowUb li.G8aQO"), (item) => (
+        item.textContent.trim()
+      )),
+    }));
+  };
   const structuralOffers = structuralOfferSignals();
 
   return {
@@ -860,6 +873,7 @@
     address: addressValue(),
     located_in: itemValue("locatedin"),
     status: firstText(["div.OqCZI .ZDu9vd", "div.OqCZI .o0Svhf"]),
+    opening_hours: openingHours(),
     website: firstAttr(["a[data-item-id='authority']"], "href", document) || itemValue("authority"),
     reservation_links: collectReservationLinks(),
     phone: firstText([

@@ -311,6 +311,22 @@ class PlaceReservationLink:
 
 
 @dataclass(slots=True)
+class PlaceOpeningHours:
+    """One day from the displayed Maps schedule, with localized labels."""
+
+    day: str
+    hours: list[str]
+    is_open_24h: bool | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        """Convert the day's opening hours into a JSON-serializable dictionary."""
+        result: dict[str, object] = {"day": self.day, "hours": self.hours}
+        if self.is_open_24h is not None:
+            result["is_open_24h"] = self.is_open_24h
+        return result
+
+
+@dataclass(slots=True)
 class PlaceDetails:
     """A parsed Google Maps place page."""
 
@@ -352,6 +368,7 @@ class PlaceDetails:
     search_result_description: str | None = None
     search_result_url: str | None = None
     cid: str | None = None
+    opening_hours: list[PlaceOpeningHours] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         """Convert place details into a JSON-serializable dictionary."""
@@ -376,6 +393,7 @@ class PlaceDetails:
             "address_display_en_confidence": self.address_display_en_confidence,
             "located_in": self.located_in,
             "status": self.status,
+            "opening_hours": [day.to_dict() for day in self.opening_hours],
             "website": self.website,
             "reservation_links": [link.to_dict() for link in self.reservation_links],
             "phone": self.phone,

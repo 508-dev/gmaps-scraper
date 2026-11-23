@@ -12,6 +12,7 @@ from gmaps_scraper.cli import (
     _download_place_photo,
     _place_screenshot_path,
     _scrape_place_for_debug,
+    build_parser,
     main,
 )
 from gmaps_scraper.models import PlaceDetails, PlaceScrapeResult, SavedList, SavedListScrapeResult
@@ -68,6 +69,29 @@ def _result(payload: dict[str, object]) -> Mock:
 
 
 class CliTests(unittest.TestCase):
+    def test_fetch_mode_help_describes_place_mode_restrictions(self) -> None:
+        help_text = " ".join(build_parser().format_help().split())
+
+        self.assertIn("Curl mode is for saved lists only.", help_text)
+        self.assertIn("Place scraping uses the browser with auto or browser.", help_text)
+
+    def test_place_kind_rejects_curl_fetch_mode(self) -> None:
+        stderr = io.StringIO()
+        url = "https://www.google.com/maps/place/Den"
+        with (
+            patch("sys.argv", ["gmaps-scraper", url, "--kind", "place", "--fetch-mode", "curl"]),
+            patch("gmaps_scraper.cli.scrape_place") as scrape,
+            redirect_stderr(stderr),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            main()
+
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn(
+            "`--fetch-mode curl` is only supported with `--kind list`.", stderr.getvalue()
+        )
+        scrape.assert_not_called()
+
     def test_place_screenshot_path_includes_digest_to_avoid_slug_collisions(self) -> None:
         path_a = _place_screenshot_path(
             Path("screenshots"),
