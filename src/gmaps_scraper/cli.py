@@ -106,8 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "curl", "browser"],
         default=DEFAULT_COLLECTION_MODE,
         help=(
-            "Fetch mode: auto (curl_cffi with browser fallback), curl, or "
-            "browser."
+            "For saved lists, auto tries HTTP first and falls back to the browser. "
+            "Curl mode is for saved lists only. Place scraping uses the browser "
+            "with auto or browser."
         ),
     )
     parser.add_argument(
@@ -273,8 +274,8 @@ def main() -> int:
     if args.kind == "place":
         if args.collection_mode == "curl":
             parser.error(
-                "Place scraping currently requires browser mode. "
-                "Use `--fetch-mode browser`."
+                "`--fetch-mode curl` is only supported with `--kind list`. "
+                "For places, use `--fetch-mode auto` or `--fetch-mode browser`."
             )
         if args.llm_cache_dir is not None and not args.llm_repair:
             parser.error("`--llm-cache-dir` requires `--llm-repair`.")
