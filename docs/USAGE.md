@@ -76,6 +76,7 @@ Pass URLs as positional arguments, through `--input`, or both.
 | `--llm-cache-dir PATH` | Unset | Cache optional LLM place repairs. Requires `--llm-repair`. |
 | `--skip-reviews` | Off | Skip opening a place's Reviews tab. |
 | `--skip-about` | Off | Skip opening a place's About tab. |
+| `--skip-preview-if-dom-complete` | Off | Skip the HTTP preview when a full place overview supplies the core facts. |
 | `--dump-debug-output` | Off | Write debug artifacts for a single URL under `.gmaps-debug/`. |
 
 ### Proxy, Timeouts, and Cookies
@@ -164,6 +165,14 @@ uv run gmaps-scraper \
   --screenshot-output-dir .context/places/screenshots \
   --output place-results.json
 ```
+
+For overview refreshes, `--skip-preview-if-dom-complete` avoids an extra HTTP
+request when a full place view already supplies a name, address, phone, website,
+and coordinates from the view or the canonical URL. Preview-only fields can be
+absent in that mode. A batch can accept such a result with quality flags that
+identify missing fields. The Python functions `scrape_place()`,
+`scrape_places()`, and `collect_place_snapshot()` accept
+`skip_preview_if_dom_complete=True`.
 
 Browser sessions use a weighted random desktop viewport by default. Persistent
 profile sessions keep a stable viewport for that profile path. Use

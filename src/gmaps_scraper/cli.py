@@ -235,6 +235,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="For place scraping, skip opening the About tab.",
     )
     parser.add_argument(
+        "--skip-preview-if-dom-complete",
+        action="store_true",
+        help="For place scraping, skip the HTTP preview when the browser has core overview facts.",
+    )
+    parser.add_argument(
         "--dump-debug-output",
         action="store_true",
         help=(
@@ -324,6 +329,7 @@ def main() -> int:
                     llm_tasks=llm_tasks,
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
+                    skip_preview_if_dom_complete=args.skip_preview_if_dom_complete,
                     max_concurrency=args.max_concurrency,
                     max_retries=args.max_retries,
                     retry_backoff_ms=args.retry_backoff_ms,
@@ -342,6 +348,7 @@ def main() -> int:
                     llm_tasks=llm_tasks,
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
+                    skip_preview_if_dom_complete=args.skip_preview_if_dom_complete,
                     max_concurrency=args.max_concurrency,
                     max_retries=args.max_retries,
                     retry_backoff_ms=args.retry_backoff_ms,
@@ -402,6 +409,7 @@ def main() -> int:
                     llm_tasks=llm_tasks,
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
+                    skip_preview_if_dom_complete=args.skip_preview_if_dom_complete,
                 )
             else:
                 place_result = scrape_place(
@@ -416,6 +424,7 @@ def main() -> int:
                     llm_tasks=llm_tasks,
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
+                    skip_preview_if_dom_complete=args.skip_preview_if_dom_complete,
                     screenshot_path=screenshot_path,
                     overview_screenshot_path=overview_screenshot_path,
                 )
@@ -432,6 +441,7 @@ def main() -> int:
                 llm_tasks=llm_tasks,
                 collect_reviews=collect_reviews,
                 collect_about=collect_about,
+                skip_preview_if_dom_complete=args.skip_preview_if_dom_complete,
                 screenshot_path=_place_screenshot_path(
                     args.screenshot_output_dir or (place_debug_output_dir / "artifacts"),
                     place_urls[0],
@@ -494,6 +504,8 @@ def main() -> int:
         parser.error("`--skip-reviews` is supported only with `--kind place`.")
     if args.skip_about:
         parser.error("`--skip-about` is supported only with `--kind place`.")
+    if args.skip_preview_if_dom_complete:
+        parser.error("`--skip-preview-if-dom-complete` is supported only with `--kind place`.")
     if args.screenshot_output_dir is not None:
         parser.error("`--screenshot-output-dir` is supported only with `--kind place`.")
     list_urls = _read_urls(args.urls, args.input)
@@ -664,6 +676,7 @@ def _scrape_place_for_debug(
     llm_tasks: tuple[PlaceLLMTask, ...] = ("dom_repair", "display_translation"),
     collect_reviews: bool = True,
     collect_about: bool = True,
+    skip_preview_if_dom_complete: bool = False,
     screenshot_path: Path | None = None,
     overview_screenshot_path: Path | None = None,
 ) -> tuple[PlaceDetails, dict[str, object], dict[str, object], dict[str, object]]:
@@ -676,6 +689,7 @@ def _scrape_place_for_debug(
         http_session=http_session,
         collect_reviews=collect_reviews,
         collect_about=collect_about,
+        skip_preview_if_dom_complete=skip_preview_if_dom_complete,
         screenshot_path=screenshot_path,
         overview_screenshot_path=overview_screenshot_path,
     )

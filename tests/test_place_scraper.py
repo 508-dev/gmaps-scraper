@@ -387,6 +387,106 @@ class PlaceScraperTests(unittest.TestCase):
             review_signal.assert_not_called()
             self.assertEqual(screenshot_path.read_bytes(), b"screenshot")
 
+    def test_collect_place_snapshot_skips_preview_only_for_complete_overview(self) -> None:
+        place_url = "https://www.google.com/maps/place/Den"
+        search_url = "https://www.google.com/maps/search/?api=1&query=Den"
+        overview = {
+            "name": "Den",
+            "address": "2 Chome-3-18 Jingumae, Shibuya, Tokyo",
+            "phone": "+81 3-6455-5433",
+            "website": "https://www.jimbochoden.com/",
+            "lat": 35.6731762,
+            "lng": 139.7127216,
+        }
+        cases = (
+            (place_url, {}, False, False),
+            (place_url, {}, True, True),
+            (place_url, {"phone": None}, True, False),
+            (place_url, {"lat": 900}, True, False),
+            (place_url, {"limited_view": True}, True, False),
+            (search_url, {}, True, False),
+        )
+        for resolved_url, changes, opt_in, skipped in cases:
+            with self.subTest(resolved_url=resolved_url, changes=changes, opt_in=opt_in):
+                context = Mock()
+                page = context.new_page.return_value
+                page.url = resolved_url
+                page.evaluate.side_effect = (
+                    lambda script, dom={**overview, **changes}: (
+                        dom if script == _PLACE_JS_EXTRACTOR else False
+                    )
+                )
+                enrichment = {"description": "Preview-only description"}
+                with (
+                    patch(
+                        "gmaps_scraper.place_scraper._launch_browser_context",
+                        return_value=context,
+                    ),
+                    patch("gmaps_scraper.place_scraper._handle_google_consent"),
+                    patch(
+                        "gmaps_scraper.place_scraper._collect_preview_place_enrichment",
+                        return_value=enrichment,
+                    ) as preview,
+                ):
+                    snapshot = collect_place_snapshot(
+                        place_url,
+                        collect_reviews=False,
+                        collect_about=False,
+                        skip_preview_if_dom_complete=opt_in,
+                    )
+
+                self.assertEqual(snapshot["preview_skipped"], skipped)
+                self.assertEqual(snapshot["preview"], {} if skipped else enrichment)
+                self.assertEqual(preview.call_count, 0 if skipped else 1)
+
+    def test_batch_accepts_a_complete_overview_without_preview_fields(self) -> None:
+        place_url = "https://www.google.com/maps/place/Den"
+        for opt_in, limited_view, expected_attempts in (
+            (True, False, 1),
+            (False, False, 2),
+            (True, True, 2),
+        ):
+            with self.subTest(opt_in=opt_in, limited_view=limited_view):
+                context = Mock()
+                page = context.new_page.return_value
+                page.url = place_url
+                overview = {
+                    "name": "Den",
+                    "address": "2 Chome-3-18 Jingumae, Shibuya, Tokyo",
+                    "phone": "+81 3-6455-5433",
+                    "website": "https://www.jimbochoden.com/",
+                    "lat": 35.6731762,
+                    "lng": 139.7127216,
+                    "limited_view": limited_view,
+                }
+                page.evaluate.side_effect = (
+                    lambda script, dom=overview: dom if script == _PLACE_JS_EXTRACTOR else False
+                )
+                with (
+                    patch(
+                        "gmaps_scraper.place_scraper._launch_browser_context",
+                        return_value=context,
+                    ),
+                    patch("gmaps_scraper.place_scraper._handle_google_consent"),
+                    patch(
+                        "gmaps_scraper.place_scraper._collect_preview_place_enrichment",
+                        return_value={},
+                    ) as preview,
+                ):
+                    result, = scrape_places(
+                        [place_url],
+                        collect_reviews=False,
+                        collect_about=False,
+                        skip_preview_if_dom_complete=opt_in,
+                        retry_backoff_ms=0,
+                    )
+
+                self.assertEqual(result.attempts, expected_attempts)
+                self.assertEqual(preview.call_count, 0 if expected_attempts == 1 else 2)
+                self.assertEqual(result.error is None, expected_attempts == 1)
+                assert result.place is not None and result.place.diagnostics is not None
+                self.assertIn("thin_place_result", result.place.diagnostics.quality_flags)
+
     def test_collect_reservation_dialog_snapshot_clicks_and_reads_provider_links(self) -> None:
         class _FakePage:
             def __init__(self) -> None:
