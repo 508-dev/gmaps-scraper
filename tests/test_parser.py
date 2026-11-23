@@ -473,6 +473,16 @@ class ParserTests(unittest.TestCase):
             "https://www.google.com/maps/search/?api=1&query=Northwind+Cafe%2C+Example+District",
         )
 
+    def test_preserves_cid_and_alias_in_a_padded_identifier_tuple(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        first_metadata = runtime_state[1][8][0][1]
+        first_metadata[6] = [_NORTHWIND_CELL_ID, None, _NORTHWIND_CID, None]
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(parsed.places[0].cid, _NORTHWIND_CID)
+        self.assertEqual(parsed.places[0].cid_aliases, [_NORTHWIND_CELL_ID])
+
     def test_does_not_use_owner_payload_inside_metadata_as_place_cid(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
         first_place = runtime_state[1][8][0]
@@ -867,6 +877,44 @@ class ParserTests(unittest.TestCase):
             parsed.places[1].added_by.to_dict() if parsed.places[1].added_by else None,
             {"name": "Name Only Collaborator"},
         )
+
+    def test_accepts_trailing_metadata_in_known_owner_records(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        list_node = runtime_state[1]
+        list_node[3].append({"verified": True})
+        list_node[8][1][12].append({"verified": False})
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertEqual(
+            parsed.owner.to_dict() if parsed.owner else None,
+            {
+                "name": "Fixture Owner",
+                "photo_url": "https://lh3.googleusercontent.com/a-/fixture-owner",
+                "profile_id": "104356373423434804635",
+            },
+        )
+        collaborator = {
+            "name": "Fixture Collaborator",
+            "photo_url": "https://lh3.googleusercontent.com/a-/fixture-collaborator",
+            "profile_id": "205678901234567890123",
+        }
+        added_by = parsed.places[1].added_by
+        self.assertEqual(added_by.to_dict() if added_by else None, collaborator)
+        self.assertEqual([owner.to_dict() for owner in parsed.collaborators], [collaborator])
+
+    def test_ignores_unrelated_long_records_when_scanning_for_owners(self) -> None:
+        runtime_state = copy.deepcopy(["noise", _LIST_NODE])
+        list_node = runtime_state[1]
+        list_node.append(["Header label", 1, None, {"visible": True}])
+        first_place = list_node[8][0]
+        first_place[12] = None
+        first_place.append(["Photo attribution", ["image"], 42, None])
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=runtime_state)
+
+        self.assertIsNone(parsed.places[0].added_by)
+        self.assertEqual([owner.name for owner in parsed.collaborators], ["Fixture Collaborator"])
 
     def test_filters_sparse_owner_from_collaborators(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])
