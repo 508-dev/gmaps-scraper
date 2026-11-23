@@ -347,7 +347,20 @@
     } else if (text.includes("萬") || text.includes("万")) {
       multiplier = 10000;
     }
-    const numeric = parseFloat(text.replace(/[,\sKM萬万]/g, ""));
+    const numberText = text.replace(/[KM萬万]$/, "").trim();
+    let normalized = numberText.replace(/\s/g, "");
+    // Match Python's separator handling when ranking DOM candidates.
+    if (multiplier === 1 && /^[0-9]{1,3}(?:[.,\s][0-9]{3})+$/.test(numberText)) {
+      normalized = normalized.replace(/[.,]/g, "");
+    } else if (
+      multiplier > 1
+      && /^(?:[0-9]+,[0-9]{1,2}|[0-9]{1,3}(?:\.[0-9]{3})+,[0-9]+)$/.test(normalized)
+    ) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+    const numeric = Number(normalized);
     return Number.isFinite(numeric) ? numeric * multiplier : 0;
   };
 

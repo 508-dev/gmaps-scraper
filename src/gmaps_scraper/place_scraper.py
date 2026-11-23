@@ -8,6 +8,7 @@ import statistics
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from importlib import resources
 from pathlib import Path
@@ -4203,9 +4204,18 @@ def _parse_review_count(value: object) -> int | None:
     suffix = match.group(2).upper()
     if not suffix and re.fullmatch(r"\d{1,3}(?:[.,\s]\d{3})+", number_text):
         return int(re.sub(r"[.,\s]", "", number_text))
+    normalized = re.sub(r"\s", "", number_text)
+    # A lone comma followed by three digits remains a grouping separator.
+    # Period groups before a comma disambiguate a decimal comma of any precision.
+    if suffix and re.fullmatch(
+        r"(?:[0-9]+,[0-9]{1,2}|[0-9]{1,3}(?:\.[0-9]{3})+,[0-9]+)", normalized
+    ):
+        normalized = normalized.replace(".", "").replace(",", ".")
+    else:
+        normalized = normalized.replace(",", "")
     try:
-        number = float(number_text.replace(",", "").replace(" ", ""))
-    except ValueError:
+        numerator, denominator = Decimal(normalized).as_integer_ratio()
+    except (InvalidOperation, ValueError):
         return None
     multiplier = 1
     if suffix == "K":
@@ -4214,7 +4224,7 @@ def _parse_review_count(value: object) -> int | None:
         multiplier = 1_000_000
     elif suffix in {"萬", "万"}:
         multiplier = 10_000
-    return int(number * multiplier)
+    return numerator * multiplier // denominator
 
 
 def _resolve_review_count(snapshot: Mapping[str, object], lines: list[str]) -> int | None:

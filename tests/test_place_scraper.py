@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from decimal import localcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -134,6 +135,19 @@ class PlaceJsExtractorFixtureTests(unittest.TestCase):
             "https://lh3.googleusercontent.com/place-overview.jpg",
         )
         self.assertFalse(snapshot["limited_view"])
+
+    def test_overview_fixture_ranks_localized_review_count_candidates(self) -> None:
+        snapshot = self._evaluate_fixture("localized_review_counts.html")
+
+        self.assertIsInstance(snapshot, dict)
+        self.assertEqual(snapshot["review_count"], "1.234,5K")
+        self.assertEqual(snapshot["review_count_source"], "f7nice")
+        details = _build_place_details(
+            "https://www.google.com/maps/place/Fixture+Cafe",
+            resolved_url="https://www.google.com/maps/place/Fixture+Cafe",
+            snapshot=snapshot,
+        )
+        self.assertEqual(details.review_count, 1_234_500)
 
     def test_reviews_fixture_keeps_reviewer_photo_out_of_place_photo(self) -> None:
         snapshot = self._evaluate_fixture("reviews.html")
@@ -915,6 +929,41 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(_parse_review_count("1.296"), 1296)
         self.assertEqual(_parse_review_count("3.6K"), 3600)
         self.assertEqual(_parse_review_count("9.4万"), 94000)
+
+    def test_parse_review_count_handles_localized_suffixes_and_grouping(self) -> None:
+        cases = (
+            ("1,2K", 1_200),
+            ("2,01K", 2_010),
+            ("1,2M", 1_200_000),
+            ("1,13万", 11_300),
+            ("1,13萬", 11_300),
+            ("1,234K", 1_234_000),
+            ("1,234.5K", 1_234_500),
+            ("1.234,5K", 1_234_500),
+            ("1.234,567K", 1_234_567),
+            ("1\u202f234,5K", 1_234_500),
+        )
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(_parse_review_count(value), expected)
+
+    def test_parse_review_count_ignores_decimal_context_precision(self) -> None:
+        with localcontext(prec=2):
+            self.assertEqual(_parse_review_count("2,01K"), 2_010)
+            self.assertEqual(_parse_review_count("1.234,5678K"), 1_234_567)
+
+    def test_build_place_details_parses_localized_review_count(self) -> None:
+        for review_snapshot in (
+            {"review_count": "1.234,5K"},
+            {"panel_text": "(1.234,5K) reviews"},
+        ):
+            with self.subTest(review_snapshot=review_snapshot):
+                details = _build_place_details(
+                    "https://www.google.com/maps/place/Den",
+                    resolved_url="https://www.google.com/maps/place/Den",
+                    snapshot={"name": "Den", **review_snapshot},
+                )
+                self.assertEqual(details.review_count, 1_234_500)
 
     def test_extract_review_count_from_lines_prefers_place_panel_over_related_cards(
         self,
