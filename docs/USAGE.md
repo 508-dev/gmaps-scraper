@@ -70,10 +70,16 @@ kind of batch writes all its results before returning status `1` when
 `--fail-on-error` is set and any scrape fails. By default, the status is `0`
 when the batch finishes and writes its results.
 
-Saved-list batches run sequentially, using the same configured browser profile
-and HTTP cookie jar for each URL. `--stagger-ms` adds a delay between URLs.
-Batch debug dumps and the place-specific retry and concurrency controls are
-unavailable for saved lists.
+Saved-list batches default to one worker, using the configured browser profile
+and HTTP cookie jar for each URL. With `--max-concurrency` above `1`, workers
+use separate profile subdirectories and cookie jars. `--stagger-ms` adds a
+delay before each worker starts and between URLs within each worker. Debug
+dumps are available for single-list runs.
+
+Use `--max-retries` to retry failures per URL. Saved-list batches default to
+zero retries. `--retry-backoff-ms` sets the initial delay, which increases
+linearly on successive retries. Results include `attempts` for URLs tried
+more than once.
 
 The Python library exposes the same workflow through `scrape_saved_lists(urls)`,
 which returns `SavedListScrapeResult` objects with `saved_list` and `error`

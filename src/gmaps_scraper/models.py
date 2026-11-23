@@ -147,6 +147,7 @@ class SavedListScrapeResult:
     source_url: str
     saved_list: SavedList | None = None
     error: str | None = None
+    attempts: int = 1
 
     def to_dict(self) -> dict[str, object]:
         """Convert a batch result into a JSON-serializable dictionary."""
@@ -155,6 +156,8 @@ class SavedListScrapeResult:
             result["saved_list"] = self.saved_list.to_dict()
         if self.error is not None:
             result["error"] = self.error
+        if self.attempts > 1:
+            result["attempts"] = self.attempts
         return result
 
 

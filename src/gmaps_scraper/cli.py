@@ -161,22 +161,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-concurrency",
         type=int,
         default=1,
-        help="For batch place scraping, number of concurrent workers. Defaults to 1.",
+        help="For batch scraping, number of concurrent workers. Defaults to 1.",
     )
     parser.add_argument(
         "--max-retries",
         type=int,
-        default=1,
         help=(
-            "For batch place scraping, per-place retries after failures or "
-            "retryable quality flags."
+            "For batch scraping, per-URL retries after failures or retryable place quality "
+            "flags. Defaults to 0 for saved lists and 1 for places."
         ),
     )
     parser.add_argument(
         "--retry-backoff-ms",
         type=int,
         default=2_000,
-        help="For batch place scraping, linear retry backoff in milliseconds.",
+        help="For batch scraping, linear retry backoff in milliseconds.",
     )
     parser.add_argument(
         "--stagger-ms",
@@ -250,6 +249,9 @@ def main() -> int:
     args = parser.parse_args()
     if not args.urls and args.input is None:
         parser.error("at least one URL or --input is required.")
+    max_retries = args.max_retries
+    if max_retries is None:
+        max_retries = 0 if args.kind == "list" else 1
     browser_session = None
     if (
         args.session_dir is not None
@@ -324,7 +326,7 @@ def main() -> int:
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
                     max_concurrency=args.max_concurrency,
-                    max_retries=args.max_retries,
+                    max_retries=max_retries,
                     retry_backoff_ms=args.retry_backoff_ms,
                     stagger_ms=args.stagger_ms,
                 )
@@ -342,7 +344,7 @@ def main() -> int:
                     collect_reviews=collect_reviews,
                     collect_about=collect_about,
                     max_concurrency=args.max_concurrency,
-                    max_retries=args.max_retries,
+                    max_retries=max_retries,
                     retry_backoff_ms=args.retry_backoff_ms,
                     stagger_ms=args.stagger_ms,
                     screenshot_output_dir=args.screenshot_output_dir,
@@ -509,6 +511,9 @@ def main() -> int:
             collection_mode=args.collection_mode,
             browser_session=browser_session,
             http_session=http_session,
+            max_concurrency=args.max_concurrency,
+            max_retries=max_retries,
+            retry_backoff_ms=args.retry_backoff_ms,
             stagger_ms=args.stagger_ms,
         )
         return _write_batch_output(

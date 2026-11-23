@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from http.cookiejar import Cookie
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, call, patch
@@ -168,6 +169,90 @@ class _FakeCurlRequests:
 
 
 class BatchSavedListTests(unittest.TestCase):
+    def test_parallel_batch_isolates_worker_sessions_and_preserves_order(self) -> None:
+        urls = [f"https://maps.app.goo.gl/example-{index}" for index in range(5)]
+        browser_session = BrowserSessionConfig(
+            profile_dir=Path("profile"),
+            proxy="http://proxy.example:8080",
+            window_size=None,
+            human_mouse=True,
+        )
+        http_session = HttpSessionConfig(
+            cookie_jar_path=Path("cookies.txt"), proxy="http://proxy.example:8080"
+        )
+        two_workers_started = Barrier(2, timeout=3)
+
+        def scrape_one(url: str, **_kwargs: object) -> SavedList:
+            if url in urls[:2]:
+                two_workers_started.wait()
+            if url == urls[2]:
+                raise ScrapeError("unavailable")
+            return SavedList(url, None, None, url, None, [])
+
+        with patch("gmaps_scraper.scraper.scrape_saved_list", side_effect=scrape_one) as scrape:
+            results = scrape_saved_lists(
+                urls,
+                browser_session=browser_session,
+                http_session=http_session,
+                max_concurrency=2,
+            )
+
+        self.assertEqual([result.source_url for result in results], urls)
+        self.assertEqual(
+            [result.error for result in results], [None, None, "unavailable", None, None]
+        )
+        self.assertEqual(scrape.call_count, len(urls))
+        scrape_kwargs = {args.args[0]: args.kwargs for args in scrape.call_args_list}
+        for index, url in enumerate(urls):
+            worker = index % 2 + 1
+            self.assertEqual(
+                scrape_kwargs[url]["browser_session"],
+                BrowserSessionConfig(
+                    profile_dir=Path("profile") / f"worker-{worker}",
+                    proxy=browser_session.proxy,
+                    window_size=None,
+                    human_mouse=True,
+                ),
+            )
+            self.assertEqual(
+                scrape_kwargs[url]["http_session"],
+                HttpSessionConfig(
+                    cookie_jar_path=Path(f"cookies.worker-{worker}.txt"),
+                    proxy=http_session.proxy,
+                ),
+            )
+
+    def test_batch_retries_each_url_with_linear_backoff(self) -> None:
+        urls = ["https://maps.app.goo.gl/example-a", "https://maps.app.goo.gl/example-b"]
+        saved_list = SavedList(urls[0], None, None, "Coffee stops", None, [])
+        with (
+            patch(
+                "gmaps_scraper.scraper.scrape_saved_list",
+                side_effect=[
+                    ScrapeError("temporarily unavailable"),
+                    saved_list,
+                    ScrapeError("connection reset"),
+                    ScrapeError("timed out"),
+                    ParseError("payload unavailable"),
+                ],
+            ) as scrape_one,
+            patch("gmaps_scraper.scraper.time.sleep") as sleep,
+        ):
+            results = scrape_saved_lists(urls, max_retries=2, retry_backoff_ms=500)
+
+        self.assertEqual(
+            [args.args[0] for args in scrape_one.call_args_list],
+            [urls[0], urls[0], urls[1], urls[1], urls[1]],
+        )
+        self.assertEqual(sleep.call_args_list, [call(0.5), call(0.5), call(1.0)])
+        self.assertEqual(
+            [result.to_dict() for result in results],
+            [
+                {"source_url": urls[0], "saved_list": saved_list.to_dict(), "attempts": 2},
+                {"source_url": urls[1], "error": "payload unavailable", "attempts": 3},
+            ],
+        )
+
     def test_batch_continues_after_browser_fallback_lifecycle_errors(self) -> None:
         urls = [f"https://maps.app.goo.gl/example-{index}" for index in range(3)]
         first = SavedList(urls[0], None, None, "Coffee stops", None, [])
