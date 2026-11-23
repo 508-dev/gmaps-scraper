@@ -54,6 +54,31 @@ uv run gmaps-scraper URL --fetch-mode browser
 
 Place scraping currently uses the browser path.
 
+## Batch Saved-List Scraping
+
+Pass multiple saved-list URLs or use `--input` with a newline-delimited file.
+Use `--input -` for stdin. Blank lines and comments in the input are ignored.
+
+```bash
+uv run gmaps-scraper --kind list --input lists.txt --fail-on-error --output list-results.json
+```
+
+Batch results are returned as `{"results": [...]}` in input order. Each result
+contains its `source_url` and either a `saved_list` object or an `error` message.
+A single positional URL still returns the saved-list object directly. Either
+kind of batch writes all its results before returning status `1` when
+`--fail-on-error` is set and any scrape fails. By default, the status is `0`
+when the batch finishes and writes its results.
+
+Saved-list batches run sequentially, using the same configured browser profile
+and HTTP cookie jar for each URL. `--stagger-ms` adds a delay between URLs.
+Batch debug dumps and the place-specific retry and concurrency controls are
+unavailable for saved lists.
+
+The Python library exposes the same workflow through `scrape_saved_lists(urls)`,
+which returns `SavedListScrapeResult` objects with `saved_list` and `error`
+attributes.
+
 ## Batch Place Scraping
 
 `places.txt` is newline-delimited. Blank lines and comments are ignored:
@@ -389,6 +414,7 @@ Common top-level imports:
 
 - `build_maps_search_url`
 - `scrape_saved_list`
+- `scrape_saved_lists`
 - `scrape_place`
 - `scrape_places`
 - `collect_place_snapshot`

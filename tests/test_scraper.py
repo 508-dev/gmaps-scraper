@@ -8,8 +8,9 @@ from http.cookiejar import Cookie
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
+from gmaps_scraper.models import SavedList
 from gmaps_scraper.parser import ParseError
 from gmaps_scraper.scraper import (
     BrowserArtifacts,
@@ -22,6 +23,7 @@ from gmaps_scraper.scraper import (
     _read_resolved_url,
     collect_http_artifacts,
     collect_saved_list_result,
+    scrape_saved_lists,
 )
 
 
@@ -163,6 +165,57 @@ class _FakeCurlRequests:
         session = _FakeHttpSession(self._responses, **kwargs)
         self.sessions.append(session)
         return session
+
+
+class BatchSavedListTests(unittest.TestCase):
+    def test_batch_continues_after_collection_and_parsing_errors(self) -> None:
+        urls = [f"https://maps.app.goo.gl/example-{index}" for index in range(3)]
+        saved_list = SavedList(urls[2], None, None, "Sample Coffee Stops", None, [])
+        browser_session = BrowserSessionConfig(profile_dir=Path("profile"))
+        http_session = HttpSessionConfig(cookie_jar_path=Path("cookies.txt"))
+
+        with (
+            patch(
+                "gmaps_scraper.scraper.scrape_saved_list",
+                side_effect=[ScrapeError("unavailable"), ParseError("no payload"), saved_list],
+            ) as scrape_one,
+            patch("gmaps_scraper.scraper.time.sleep") as sleep,
+        ):
+            results = scrape_saved_lists(
+                urls,
+                headless=False,
+                timeout_ms=12_000,
+                settle_time_ms=1_000,
+                collection_mode="browser",
+                browser_session=browser_session,
+                http_session=http_session,
+                stagger_ms=250,
+            )
+
+        self.assertEqual(
+            scrape_one.call_args_list,
+            [
+                call(
+                    url,
+                    headless=False,
+                    timeout_ms=12_000,
+                    settle_time_ms=1_000,
+                    collection_mode="browser",
+                    browser_session=browser_session,
+                    http_session=http_session,
+                )
+                for url in urls
+            ],
+        )
+        self.assertEqual(sleep.call_args_list, [call(0.25), call(0.25)])
+        self.assertEqual(
+            [result.to_dict() for result in results],
+            [
+                {"source_url": urls[0], "error": "unavailable"},
+                {"source_url": urls[1], "error": "no payload"},
+                {"source_url": urls[2], "saved_list": saved_list.to_dict()},
+            ],
+        )
 
 
 class ScraperConsentTests(unittest.TestCase):

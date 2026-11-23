@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal, cast
@@ -18,7 +18,12 @@ from gmaps_scraper.llm import (
     llm_cache_namespace_from_env,
     openai_compatible_place_repairer_from_env,
 )
-from gmaps_scraper.models import PlaceDetails, PlaceLLMRepairRequest
+from gmaps_scraper.models import (
+    PlaceDetails,
+    PlaceLLMRepairRequest,
+    PlaceScrapeResult,
+    SavedListScrapeResult,
+)
 from gmaps_scraper.place_scraper import (
     _PLACE_LLM_PROMPT_VERSION,
     PlaceLLMRepairer,
@@ -48,6 +53,7 @@ from gmaps_scraper.scraper import (
     _import_curl_requests,
     _raise_for_status,
     collect_saved_list_result,
+    scrape_saved_lists,
 )
 from gmaps_scraper.url_tools import extract_list_id
 
@@ -149,10 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input",
         type=Path,
-        help=(
-            "For place scraping, read additional place URLs from a newline-delimited "
-            "file, or use '-' for stdin."
-        ),
+        help="Read additional URLs from a newline-delimited file, or use '-' for stdin.",
     )
     parser.add_argument(
         "--max-concurrency",
@@ -179,15 +182,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--stagger-ms",
         type=int,
         default=0,
-        help="For batch place scraping, delay starts between URLs or workers.",
+        help="For batch scraping, delay starts between URLs or workers.",
     )
     parser.add_argument(
         "--fail-on-error",
         action="store_true",
-        help=(
-            "For batch place scraping, return a non-zero exit code when any "
-            "place fails to scrape."
-        ),
+        help="For batch scraping, exit with status 1 if any URL fails to scrape.",
     )
     parser.add_argument(
         "--llm-repair",
@@ -303,7 +303,7 @@ def main() -> int:
                     )
             except LLMRepairError as exc:
                 parser.exit(1, f"{parser.prog}: error: {exc}\n")
-        place_urls = _read_place_urls(args.urls, args.input)
+        place_urls = _read_urls(args.urls, args.input)
         is_batch = len(place_urls) > 1 or args.input is not None
         if is_batch:
             if args.download_photo is not None or args.download_main_photo is not None:
@@ -347,20 +347,11 @@ def main() -> int:
                     stagger_ms=args.stagger_ms,
                     screenshot_output_dir=args.screenshot_output_dir,
                 )
-            payload = json.dumps(
-                {"results": [result.to_dict() for result in batch_results]},
-                indent=2,
-                ensure_ascii=False,
+            return _write_batch_output(
+                batch_results,
+                output_path=args.output,
+                fail_on_error=args.fail_on_error,
             )
-            if args.output is not None:
-                args.output.write_text(f"{payload}\n", encoding="utf-8")
-            else:
-                print(payload)
-            if args.fail_on_error and any(
-                result.error is not None for result in batch_results
-            ):
-                return 1
-            return 0
         if (
             args.download_photo is not None
             and args.output is not None
@@ -504,13 +495,31 @@ def main() -> int:
         parser.error("`--skip-about` is supported only with `--kind place`.")
     if args.screenshot_output_dir is not None:
         parser.error("`--screenshot-output-dir` is supported only with `--kind place`.")
-    if args.input is not None:
-        parser.error("`--input` is supported only with `--kind place`.")
-    if len(args.urls) != 1:
-        parser.error("list scraping requires exactly one URL.")
+    list_urls = _read_urls(args.urls, args.input)
+    if not list_urls:
+        parser.error("list scraping requires at least one URL.")
+    if len(list_urls) > 1 or args.input is not None:
+        if args.dump_debug_output or args.debug_output_dir is not None:
+            parser.error("list debug dumps are supported only for one URL.")
+        list_batch_results = scrape_saved_lists(
+            list_urls,
+            headless=not args.show_browser_window,
+            timeout_ms=args.timeout_ms,
+            settle_time_ms=args.settle_ms,
+            collection_mode=args.collection_mode,
+            browser_session=browser_session,
+            http_session=http_session,
+            stagger_ms=args.stagger_ms,
+        )
+        return _write_batch_output(
+            list_batch_results,
+            output_path=args.output,
+            fail_on_error=args.fail_on_error,
+        )
 
+    list_url = list_urls[0]
     artifacts, result = collect_saved_list_result(
-        cast(str, args.urls[0]),
+        list_url,
         headless=not args.show_browser_window,
         timeout_ms=args.timeout_ms,
         settle_time_ms=args.settle_ms,
@@ -519,14 +528,14 @@ def main() -> int:
         http_session=http_session,
     )
     debug_output_dir = _resolve_debug_output_dir(
-        list_url=cast(str, args.urls[0]),
+        list_url=list_url,
         resolved_url=artifacts.resolved_url,
         dump_debug_output=args.dump_debug_output,
         debug_output_dir=args.debug_output_dir,
     )
     if debug_output_dir is not None:
         write_debug_dump(
-            args.urls[0],
+            list_url,
             resolved_url=artifacts.resolved_url,
             runtime_state=artifacts.runtime_state,
             script_texts=artifacts.script_texts,
@@ -594,7 +603,7 @@ def _download_place_image(
         raise RuntimeError(f"Failed to download place photo: {exc}") from exc
 
 
-def _read_place_urls(urls: list[str], input_path: Path | None) -> list[str]:
+def _read_urls(urls: list[str], input_path: Path | None) -> list[str]:
     result = list(urls)
     if input_path is not None:
         text = (
@@ -607,6 +616,24 @@ def _read_place_urls(urls: list[str], input_path: Path | None) -> list[str]:
             if stripped and not stripped.startswith("#"):
                 result.append(stripped)
     return result
+
+
+def _write_batch_output(
+    batch_results: Sequence[PlaceScrapeResult | SavedListScrapeResult],
+    *,
+    output_path: Path | None,
+    fail_on_error: bool,
+) -> int:
+    payload = json.dumps(
+        {"results": [result.to_dict() for result in batch_results]},
+        indent=2,
+        ensure_ascii=False,
+    )
+    if output_path is not None:
+        output_path.write_text(f"{payload}\n", encoding="utf-8")
+    else:
+        print(payload)
+    return int(fail_on_error and any(result.error is not None for result in batch_results))
 
 
 def _place_screenshot_path(

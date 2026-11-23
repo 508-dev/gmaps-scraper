@@ -140,6 +140,24 @@ class SavedList:
 
 
 @dataclass(slots=True)
+class SavedListScrapeResult:
+    """Per-URL result for a batch saved-list scrape."""
+
+    source_url: str
+    saved_list: SavedList | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        """Convert a batch result into a JSON-serializable dictionary."""
+        result: dict[str, object] = {"source_url": self.source_url}
+        if self.saved_list is not None:
+            result["saved_list"] = self.saved_list.to_dict()
+        if self.error is not None:
+            result["error"] = self.error
+        return result
+
+
+@dataclass(slots=True)
 class ReviewTopic:
     """A Google Maps review topic/filter chip."""
 
