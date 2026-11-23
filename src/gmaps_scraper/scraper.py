@@ -148,7 +148,7 @@ def scrape_saved_lists(
     http_session: HttpSessionConfig | None = None,
     stagger_ms: int = 0,
 ) -> list[SavedListScrapeResult]:
-    """Scrape saved lists in order using the same profile and cookie jar settings."""
+    """Scrape saved lists in order and record failures in their per-URL results."""
     results: list[SavedListScrapeResult] = []
     urls = [url.strip() for url in list_urls if url.strip()]
     for index, list_url in enumerate(urls):
@@ -164,7 +164,7 @@ def scrape_saved_lists(
                 browser_session=browser_session,
                 http_session=http_session,
             )
-        except (ParseError, ScrapeError) as exc:
+        except Exception as exc:
             results.append(
                 SavedListScrapeResult(
                     source_url=list_url,

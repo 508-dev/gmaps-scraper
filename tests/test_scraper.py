@@ -168,6 +168,57 @@ class _FakeCurlRequests:
 
 
 class BatchSavedListTests(unittest.TestCase):
+    def test_batch_continues_after_browser_fallback_lifecycle_errors(self) -> None:
+        urls = [f"https://maps.app.goo.gl/example-{index}" for index in range(3)]
+        first = SavedList(urls[0], None, None, "Coffee stops", None, [])
+        last = SavedList(urls[2], None, None, "Dinner spots", None, [])
+        for failure_stage in ("launch", "close"):
+            with self.subTest(failure_stage=failure_stage):
+                error = OSError(f"browser {failure_stage} failed")
+                context = Mock()
+                page = context.new_page.return_value
+                page.url = urls[1]
+                page.frames = []
+                page.evaluate.return_value = []
+                page.content.return_value = "<html></html>"
+                if failure_stage == "close":
+                    context.close.side_effect = error
+
+                with (
+                    patch(
+                        "gmaps_scraper.scraper.collect_http_artifacts",
+                        side_effect=[
+                            BrowserArtifacts(urls[0], None, [], ""),
+                            ScrapeError("HTTP unavailable"),
+                            BrowserArtifacts(urls[2], None, [], ""),
+                        ],
+                    ) as collect_http,
+                    patch(
+                        "gmaps_scraper.scraper.parse_saved_list_artifacts",
+                        side_effect=[first, last],
+                    ),
+                    patch(
+                        "gmaps_scraper.scraper._launch_browser_context",
+                        side_effect=error if failure_stage == "launch" else None,
+                        return_value=context,
+                    ) as launch_browser,
+                ):
+                    results = scrape_saved_lists(urls)
+
+                self.assertEqual([args.args[0] for args in collect_http.call_args_list], urls)
+                launch_browser.assert_called_once()
+                if failure_stage == "close":
+                    context.close.assert_called_once_with()
+                    page.content.assert_called_once_with()
+                self.assertEqual(
+                    [result.to_dict() for result in results],
+                    [
+                        {"source_url": urls[0], "saved_list": first.to_dict()},
+                        {"source_url": urls[1], "error": str(error)},
+                        {"source_url": urls[2], "saved_list": last.to_dict()},
+                    ],
+                )
+
     def test_batch_continues_after_collection_and_parsing_errors(self) -> None:
         urls = [f"https://maps.app.goo.gl/example-{index}" for index in range(3)]
         saved_list = SavedList(urls[2], None, None, "Sample Coffee Stops", None, [])
