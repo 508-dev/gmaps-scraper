@@ -22,7 +22,6 @@ from gmaps_scraper.parser import (
     _parse_candidate_node,
     _walk_json,
 )
-from gmaps_scraper.selector_recipes import write_default_place_selector_recipe
 from gmaps_scraper.url_tools import extract_list_id
 
 
@@ -171,7 +170,7 @@ def write_place_debug_dump(
     diagnostics: PlaceExtractionDiagnostics,
     output_dir: Path,
 ) -> Path:
-    """Write place scrape artifacts plus a compact reusable selector recipe."""
+    """Write place snapshots, output, diagnostics, and repair evidence."""
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir = output_dir / "artifacts"
     artifacts_dir.mkdir(exist_ok=True)
@@ -181,7 +180,6 @@ def write_place_debug_dump(
     _write_json(output_dir / "llm-evidence.json", evidence)
     _write_json(artifacts_dir / "snapshot.json", snapshot)
     _write_json(artifacts_dir / "merged-snapshot.json", merged_snapshot)
-    write_default_place_selector_recipe(output_dir / "selector-recipe.json")
 
     summary = {
         "source_url": place_url,
@@ -193,7 +191,6 @@ def write_place_debug_dump(
             "llm_evidence": "llm-evidence.json",
             "snapshot": "artifacts/snapshot.json",
             "merged_snapshot": "artifacts/merged-snapshot.json",
-            "selector_recipe": "selector-recipe.json",
         },
         "evidence_counts": {
             "text_lines": _list_len(evidence.get("text_lines")),
