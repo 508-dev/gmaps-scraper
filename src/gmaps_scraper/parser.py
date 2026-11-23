@@ -293,7 +293,7 @@ def _extract_metadata(
     description = _clean_text(_safe_index(metadata_node, 5))
     if description == title:
         description = None
-    owner = _parse_list_owner(_safe_index(metadata_node, 3))
+    owner = _parse_list_owner(_safe_index(metadata_node, 3), allow_extra_fields=True)
     collaborators = _merge_owner_lists(
         _extract_additional_list_header_owners(metadata_node),
         _collect_place_owners(places),
@@ -374,8 +374,13 @@ def _merge_owner_lists(
     return owners
 
 
-def _parse_list_owner(node: JSONValue | None) -> ListOwner | None:
-    if not isinstance(node, list) or len(node) < 1 or len(node) > 3:
+def _parse_list_owner(
+    node: JSONValue | None,
+    *,
+    allow_extra_fields: bool = False,
+) -> ListOwner | None:
+    # Only known owner slots can safely ignore fields after the owner prefix.
+    if not isinstance(node, list) or not node or (len(node) > 3 and not allow_extra_fields):
         return None
 
     name = _clean_text(_safe_index(node, 0))
@@ -601,7 +606,7 @@ def _find_place_added_by(place_record: list[JSONValue] | None) -> ListOwner | No
     if place_record is None:
         return None
 
-    preferred = _parse_list_owner(_safe_index(place_record, 12))
+    preferred = _parse_list_owner(_safe_index(place_record, 12), allow_extra_fields=True)
     if preferred is not None:
         return preferred
 
