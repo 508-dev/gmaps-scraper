@@ -64,6 +64,7 @@ from gmaps_scraper.place_scraper import (
     _seed_google_consent_cookies,
     _should_use_llm_repair,
     collect_place_snapshot,
+    scrape_place,
     scrape_places,
 )
 from gmaps_scraper.scraper import (
@@ -149,6 +150,52 @@ class PlaceJsExtractorFixtureTests(unittest.TestCase):
         )
         self.assertEqual(details.review_count, 1_234_500)
 
+    def test_scrape_place_reads_complete_opening_hours_without_opening_tabs(self) -> None:
+        cases = (
+            (
+                "opening_hours_en.html",
+                "Closed · Opens 6 PM",
+                [
+                    *(
+                        {"day": day, "hours": ["6–8\u202fPM"]}
+                        for day in ("Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+                    ),
+                    {"day": "Sunday", "hours": ["Closed"], "is_open_24h": False},
+                    {"day": "Monday", "hours": ["Noon–2\u202fPM", "6–8\u202fPM"]},
+                ],
+            ),
+            (
+                "opening_hours_ja.html",
+                "24 時間営業",
+                [
+                    {"day": day, "hours": ["24 時間営業"], "is_open_24h": True}
+                    for day in "火曜日 水曜日 木曜日 金曜日 土曜日 日曜日 月曜日".split()
+                ],
+            ),
+        )
+        for fixture, status, expected in cases:
+            with (
+                self.subTest(fixture=fixture),
+                patch(
+                    "gmaps_scraper.place_scraper._launch_browser_context",
+                    return_value=self.context,
+                ),
+                patch.object(self.context, "close"),
+                patch(
+                    "gmaps_scraper.place_scraper._collect_preview_place_enrichment",
+                    return_value={},
+                ),
+            ):
+                details = scrape_place(
+                    (_FIXTURE_DIR / fixture).as_uri(),
+                    timeout_ms=2_000,
+                    settle_time_ms=0,
+                    collect_reviews=False,
+                    collect_about=False,
+                )
+                self.assertEqual(details.status, status)
+                self.assertEqual(details.to_dict()["opening_hours"], expected)
+
     def test_reviews_fixture_keeps_reviewer_photo_out_of_place_photo(self) -> None:
         snapshot = self._evaluate_fixture("reviews.html")
         reviews = self._evaluate_fixture("reviews.html", _PLACE_REVIEW_SNIPPET_JS)
@@ -226,6 +273,26 @@ class PlaceJsExtractorFixtureTests(unittest.TestCase):
 
 
 class PlaceScraperTests(unittest.TestCase):
+    def test_opening_hours_omits_missing_or_incomplete_week(self) -> None:
+        row = {"day": "Monday", "hours": ["Open 24 hours"]}
+        for rows, incomplete in (([], False), ([row], True), ([row] * 7, True)):
+            with self.subTest(rows=rows):
+                details = _build_place_details_from_snapshot(
+                    "https://www.google.com/maps/place/Fixture+Cafe",
+                    snapshot={
+                        "resolved_url": "https://www.google.com/maps/place/Fixture+Cafe",
+                        "dom": {"name": "Fixture Cafe", "opening_hours": rows},
+                    },
+                    llm_fallback=None,
+                    llm_policy="never",
+                )
+                self.assertNotIn("opening_hours", details.to_dict())
+                self.assertIsNotNone(details.diagnostics)
+                self.assertEqual(
+                    "opening_hours_incomplete" in details.diagnostics.quality_flags,
+                    incomplete,
+                )
+
     def test_build_place_details_from_snapshot_rejects_saved_list_resolution(self) -> None:
         with self.assertRaisesRegex(ScrapeError, "saved list"):
             _build_place_details_from_snapshot(
