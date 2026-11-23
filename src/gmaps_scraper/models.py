@@ -34,6 +34,7 @@ PLACE_LLM_REPAIR_FIELDS: tuple[str, ...] = (
     "lng",
     "limited_view",
     "google_place_id",
+    "cid",
     "review_topics",
     "about_sections",
 )

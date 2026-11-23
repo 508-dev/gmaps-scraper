@@ -381,7 +381,8 @@ place = scrape_place(localize_maps_url("https://www.google.co.jp/maps/place/Toky
 
 `PlaceDetails.cid` contains the numeric Google Maps CID as a decimal string
 when it can be recovered from the resolved Maps URL, the place preview, or
-the input Maps URL. JSON omits `cid` when none of those sources provides it.
+the input Maps URL. Optional DOM repair can supply a missing CID from the
+evidence. JSON omits `cid` when it is unavailable.
 
 `gl` is a regional search bias, not proof of location. Downstream consumers that
 have expected city/country context should still validate the resolved place

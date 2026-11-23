@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from decimal import localcontext
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from gmaps_scraper.models import (
     PlaceExtractionDiagnostics,
@@ -1896,10 +1896,21 @@ class PlaceScraperTests(unittest.TestCase):
         for payload in (
             [[place_id], ["0x1:0x2"]],
             [[place_id, "0x1:0x2"], [place_id, "0x1:0x3"]],
+            [[place_id, "ChIJabcdefghij-", "0x1:0x2"]],
         ):
             with self.subTest(payload=payload):
                 enrichment = _extract_preview_place_enrichment(json.dumps(payload))
                 self.assertNotIn("cid", enrichment)
+
+        self.assertNotIn("google_place_id", enrichment)
+
+    def test_extract_preview_cid_accepts_repeated_identical_place_ids(self) -> None:
+        place_id = "ChIJ8T36HxCLGGARvpARPDyaKLA"
+        enrichment = _extract_preview_place_enrichment(
+            json.dumps([[place_id, place_id, "0x1:0x2"]]),
+        )
+        self.assertEqual(enrichment["google_place_id"], place_id)
+        self.assertEqual(enrichment["cid"], "2")
 
     def test_extract_preview_place_enrichment_reads_rating_summary_fixture(self) -> None:
         enrichment = _extract_preview_place_enrichment(
@@ -2736,6 +2747,9 @@ class PlaceScraperTests(unittest.TestCase):
     def test_place_details_omit_invalid_cids(self) -> None:
         for url in (
             "https://www.example.com/maps?cid=123",
+            "https://www.google.example.com/maps?cid=123",
+            "https://www.google.com.zz/maps?cid=123",
+            "https://www.maps.google.com/maps?cid=123",
             "https://www.google.com/maps?cid=18446744073709551616",
             "https://www.google.com/maps?cid=123&cid=456",
             "https://www.google.com/maps/search/?cid=123",
@@ -2744,6 +2758,34 @@ class PlaceScraperTests(unittest.TestCase):
                 details = _build_place_details(url, resolved_url=url, snapshot={})
                 self.assertIsNone(details.cid)
                 self.assertNotIn("cid", details.to_dict())
+
+    def test_place_dom_repair_backfills_a_missing_valid_cid(self) -> None:
+        place_url = "https://www.google.com/maps/place/Den"
+        valid_cid = "5180951040094558101"
+        for source_url, task, proposed_cid, expected in (
+            (place_url, "dom_repair", valid_cid, valid_cid),
+            (place_url, "dom_repair", "18446744073709551616", None),
+            (place_url, "dom_repair", 5180951040094558101, None),
+            (place_url, "display_translation", valid_cid, None),
+            ("https://maps.google.com/?cid=42", "dom_repair", valid_cid, "42"),
+        ):
+            with self.subTest(source_url=source_url, task=task, proposed_cid=proposed_cid):
+                repair = Mock(return_value={"fields": {"cid": proposed_cid}})
+                details = _build_place_details_from_snapshot(
+                    source_url,
+                    snapshot={"resolved_url": place_url, "dom": {}},
+                    llm_fallback=repair,
+                    llm_policy="always",
+                    llm_tasks=(task,),
+                )
+                self.assertEqual(
+                    repair.call_args.args[0].current_fields["cid"],
+                    "42" if source_url != place_url else None,
+                )
+                self.assertEqual(details.cid, expected)
+                assert details.diagnostics is not None
+                if expected == valid_cid:
+                    self.assertEqual(details.diagnostics.field_sources["cid"], "llm")
 
     def test_build_place_details_preserves_search_result_fields(self) -> None:
         details = _build_place_details(
