@@ -1619,7 +1619,11 @@ def _scrape_place_with_context_and_retries(
             last_error = str(exc)
         else:
             last_place = place
-            if not _should_retry_place_result(place, retry_quality_flags):
+            if not _should_retry_place_result(
+                place,
+                retry_quality_flags,
+                preview_skipped=_to_bool(snapshot.get("preview_skipped")),
+            ):
                 return PlaceScrapeResult(
                     source_url=place_url,
                     place=place,
@@ -1641,10 +1645,15 @@ def _scrape_place_with_context_and_retries(
 def _should_retry_place_result(
     place: PlaceDetails,
     retry_quality_flags: Sequence[str],
+    *,
+    preview_skipped: bool,
 ) -> bool:
     if not retry_quality_flags or place.diagnostics is None:
         return False
     retry_flags = set(retry_quality_flags)
+    if preview_skipped:
+        # A validated overview can lack facts normally supplied by the preview.
+        retry_flags.discard("thin_place_result")
     return any(flag in retry_flags for flag in place.diagnostics.quality_flags)
 
 
