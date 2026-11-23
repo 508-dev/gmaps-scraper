@@ -9,8 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, call, patch
+from urllib.parse import parse_qs, urlsplit
 
-from gmaps_scraper.models import SavedList
+from gmaps_scraper.models import SavedList, SavedListExtractionDiagnostics
 from gmaps_scraper.parser import ParseError
 from gmaps_scraper.scraper import (
     BrowserArtifacts,
@@ -423,6 +424,7 @@ class ScraperConsentTests(unittest.TestCase):
 
 class HttpArtifactTests(unittest.TestCase):
     def test_collect_http_artifacts_fetches_preloaded_payload(self) -> None:
+        script_text = '\n  window.APP_INITIALIZATION_STATE=["A &amp; B"];\n'
         fake_requests = _FakeCurlRequests(
             responses=[
                 _FakeHttpResponse(
@@ -430,7 +432,9 @@ class HttpArtifactTests(unittest.TestCase):
                         "<html><head>"
                         '<link href="/maps/preview/entitylist/getlist?pb=123" '
                         'as="fetch" rel="preload">'
-                        '<script>window.APP_INITIALIZATION_STATE=["inline"];</script>'
+                        '<!-- Example: <script>document.title = "Map";</script> -->'
+                        f'<SCRIPT data-label="2 > 1">{script_text}</SCRIPT>'
+                        "<script> \n </script>"
                         "</head></html>"
                     ),
                     url="https://www.google.com/maps/@/data=!3m1!4b1",
@@ -455,7 +459,7 @@ class HttpArtifactTests(unittest.TestCase):
         self.assertEqual(artifacts.resolved_url, "https://www.google.com/maps/@/data=!3m1!4b1")
         self.assertEqual(
             artifacts.script_texts,
-            ['window.APP_INITIALIZATION_STATE=["inline"];', ")]}'\n[[\"payload\"]]"],
+            [script_text, ")]}'\n[[\"payload\"]]"],
         )
         self.assertIn("/maps/preview/entitylist/getlist?pb=123", artifacts.html)
 
@@ -467,44 +471,53 @@ class HttpArtifactTests(unittest.TestCase):
             "https://www.google.com/maps/preview/entitylist/getlist?pb=123",
         )
 
+    @staticmethod
+    def _make_entitylist_payload(
+        indexes: range, total_count: int, *, cursor: str = "", list_id: str = "list-id",
+    ) -> str:
+        rows = []
+        for index in indexes:
+            ids = [str(7451636382641713350 + index), str(9055794338847426964 + index)]
+            rows.append([
+                None,
+                [
+                    None,
+                    None,
+                    "",
+                    None,
+                    f"Address {index}",
+                    [None, None, 35.0 + index, 139.0 + index],
+                    ids,
+                    f"/g/place-{index}",
+                ],
+                f"Place {index}",
+                None,
+                None,
+                None,
+                None,
+                None,
+                [[1], ids],
+            ])
+        candidate = [
+            [list_id, 3, [[1], [9]], 1, 1],
+            4,
+            [2, 1, f"https://www.google.com/maps/placelists/list/{list_id}"],
+            ["Owner", "https://example.com/avatar.jpg", "104356373423434804635"],
+            "Big list",
+            "",
+            None,
+            None,
+            rows,
+            [None, None, None, [11, "11"]],
+            [0, 0],
+            [0, 0],
+            total_count,
+        ]
+        return ")]}'\n" + json.dumps([candidate, cursor, None])
+
     def test_collect_http_artifacts_expands_entitylist_payload_when_total_exceeds_page(
         self,
     ) -> None:
-        def make_entitylist_payload(row_count: int, total_count: int) -> str:
-            rows = [
-                [
-                    None,
-                    [
-                        None,
-                        None,
-                        "",
-                        None,
-                        f"Address {index}",
-                        [None, None, 35.0 + index, 139.0 + index],
-                        [str(1000 + index), str(2000 + index)],
-                        f"/g/place-{index}",
-                    ],
-                    f"Place {index}",
-                ]
-                for index in range(row_count)
-            ]
-            candidate = [
-                ["list-id", 3, [[1], [9]], 1, 1],
-                4,
-                [2, 1, "https://www.google.com/maps/placelists/list/list-id"],
-                ["Owner", "https://example.com/avatar.jpg", "104356373423434804635"],
-                "Big list",
-                "",
-                None,
-                None,
-                rows,
-                [None, None, None, [11, "11"]],
-                [0, 0],
-                [0, 0],
-                total_count,
-            ]
-            return ")]}'\n" + json.dumps([candidate, "token", None])
-
         fake_requests = _FakeCurlRequests(
             responses=[
                 _FakeHttpResponse(
@@ -517,11 +530,11 @@ class HttpArtifactTests(unittest.TestCase):
                     url="https://www.google.com/maps/@/data=!3m1!4b1",
                 ),
                 _FakeHttpResponse(
-                    text=make_entitylist_payload(row_count=2, total_count=4),
+                    text=self._make_entitylist_payload(range(2), total_count=4),
                     url="https://www.google.com/maps/preview/entitylist/getlist?pb=%214i500",
                 ),
                 _FakeHttpResponse(
-                    text=make_entitylist_payload(row_count=4, total_count=4),
+                    text=self._make_entitylist_payload(range(4), total_count=4),
                     url="https://www.google.com/maps/preview/entitylist/getlist?pb=%214i4",
                 ),
             ]
@@ -539,12 +552,179 @@ class HttpArtifactTests(unittest.TestCase):
 
         self.assertEqual(len(artifacts.script_texts), 1)
         self.assertIn('"Place 3"', artifacts.script_texts[0])
+        self.assertTrue(artifacts.preload_expanded)
+        self.assertFalse(artifacts.preload_paginated)
 
         session = fake_requests.sessions[0]
         self.assertEqual(
             session.calls[2][0],
             "https://www.google.com/maps/preview/entitylist/getlist?pb=%214i4",
         )
+
+    def _scrape_entitylist_pages(
+        self, *pages: str, page_size: int = 500,
+    ) -> tuple[SavedList, list[tuple[str, dict[str, Any]]]]:
+        source_url = "https://www.google.com/maps/placelists/list/list-id"
+        endpoint = "/maps/preview/entitylist/getlist"
+        preload_path = (
+            f"{endpoint}?hl=en&amp;pb=%211m1%211slist-id%213e2%214i{page_size}%2116b1"
+        )
+        fake_requests = _FakeCurlRequests([
+            _FakeHttpResponse(
+                text=f'<link rel="preload" as="fetch" href="{preload_path}">',
+                url=source_url,
+            ),
+            *[
+                _FakeHttpResponse(text=page, url=f"https://www.google.com{endpoint}")
+                for page in pages
+            ],
+        ])
+        with patch("gmaps_scraper.scraper._import_curl_requests", return_value=fake_requests):
+            _, result = collect_saved_list_result(source_url, collection_mode="curl")
+        return result, fake_requests.sessions[0].calls
+
+    def test_paginates_a_saved_list_using_each_cursor_and_preserves_order(self) -> None:
+        result, calls = self._scrape_entitylist_pages(
+            self._make_entitylist_payload(range(0, 2), 5, cursor="next+p/1="),
+            self._make_entitylist_payload(range(2, 4), 5, cursor="next+p/2="),
+            self._make_entitylist_payload(range(4, 5), 5),
+            page_size=2,
+        )
+
+        self.assertEqual([place.name for place in result.places], [
+            "Place 0", "Place 1", "Place 2", "Place 3", "Place 4",
+        ])
+        self.assertEqual(result.title, "Big list")
+        self.assertEqual(result.to_dict()["diagnostics"], {
+            "artifact_source": "script_texts",
+            "runtime_state_present": False,
+            "collection_source": "http",
+            "used_browser_fallback": False,
+            "preload_expanded": False,
+            "preload_paginated": True,
+            "loaded_rows": 5,
+            "expected_rows": 5,
+            "quality_flags": [],
+        })
+        self.assertEqual(len(calls), 4)
+        for page, (url, kwargs) in enumerate(calls[2:], start=1):
+            self.assertEqual(parse_qs(urlsplit(url).query), {
+                "hl": ["en"],
+                "pb": [f"!1m1!1slist-id!3e2!4i2!5Bnext-p_{page}!16b1"],
+            })
+            self.assertEqual(kwargs, {"referer": result.resolved_url})
+
+    def test_preserves_collected_rows_when_pagination_stops_early(self) -> None:
+        bad_pages = {
+            "repeated_cursor": self._make_entitylist_payload(range(2, 3), 600, cursor="next"),
+            "overlap": self._make_entitylist_payload(range(1, 3), 600, cursor="next"),
+            "different_list": self._make_entitylist_payload(range(2, 3), 600, list_id="other"),
+            "changed_total": self._make_entitylist_payload(range(2, 3), 601),
+            "invalid_response": "<html>Try again</html>",
+        }
+        for reason, bad_page in bad_pages.items():
+            with self.subTest(reason=reason):
+                repeated_cursor = reason == "repeated_cursor"
+                result, calls = self._scrape_entitylist_pages(
+                    self._make_entitylist_payload(range(2), 600, cursor="next"), bad_page,
+                )
+                self.assertEqual(len(calls), 3)
+                expected_rows = 3 if repeated_cursor else 2
+                self.assertEqual(len(result.places), expected_rows)
+                assert result.diagnostics is not None
+                self.assertEqual(result.diagnostics.preload_paginated, repeated_cursor)
+                self.assertEqual(result.diagnostics.loaded_rows, expected_rows)
+                self.assertEqual(result.diagnostics.expected_rows, 600)
+                self.assertIn("partial_payload", result.diagnostics.quality_flags)
+
+    def test_preserves_first_page_when_bounded_expansion_returns_invalid_content(self) -> None:
+        result, calls = self._scrape_entitylist_pages(
+            self._make_entitylist_payload(range(2), 600), "<html>Try again</html>",
+            page_size=2,
+        )
+
+        self.assertEqual([place.name for place in result.places], ["Place 0", "Place 1"])
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(
+            parse_qs(urlsplit(calls[2][0]).query)["pb"], ["!1m1!1slist-id!3e2!4i500!16b1"],
+        )
+        assert result.diagnostics is not None
+        self.assertFalse(result.diagnostics.preload_expanded)
+        self.assertIn("partial_payload", result.diagnostics.quality_flags)
+
+    def test_paginates_when_a_partial_expanded_preload_introduces_a_cursor(self) -> None:
+        result, calls = self._scrape_entitylist_pages(
+            self._make_entitylist_payload(range(2), 5),
+            self._make_entitylist_payload(range(4), 5, cursor="next"),
+            self._make_entitylist_payload(range(4, 5), 5),
+            page_size=2,
+        )
+
+        self.assertEqual([place.name for place in result.places], [
+            "Place 0", "Place 1", "Place 2", "Place 3", "Place 4",
+        ])
+        self.assertEqual([parse_qs(urlsplit(url).query)["pb"] for url, _ in calls[2:]], [
+            ["!1m1!1slist-id!3e2!4i5!16b1"],
+            ["!1m1!1slist-id!3e2!4i5!5Bnext!16b1"],
+        ])
+        assert result.diagnostics is not None
+        self.assertTrue(result.diagnostics.preload_expanded)
+        self.assertTrue(result.diagnostics.preload_paginated)
+        self.assertEqual(result.diagnostics.loaded_rows, 5)
+        self.assertEqual(result.diagnostics.quality_flags, [])
+
+    def test_does_not_repeat_a_continuation_request_after_preload_expansion(self) -> None:
+        result, calls = self._scrape_entitylist_pages(
+            self._make_entitylist_payload(range(2), 700, cursor="next"),
+            "<html>Try again</html>",
+            self._make_entitylist_payload(range(3), 700, cursor="next"),
+            page_size=600,
+        )
+
+        self.assertEqual([parse_qs(urlsplit(url).query)["pb"] for url, _ in calls[2:]], [
+            ["!1m1!1slist-id!3e2!4i500!5Bnext!16b1"],
+            ["!1m1!1slist-id!3e2!4i500!16b1"],
+        ])
+        self.assertEqual(len(result.places), 3)
+        assert result.diagnostics is not None
+        self.assertTrue(result.diagnostics.preload_expanded)
+        self.assertFalse(result.diagnostics.preload_paginated)
+        self.assertIn("partial_payload", result.diagnostics.quality_flags)
+
+    def test_resolves_short_link_when_the_first_request_gets_an_interstitial(self) -> None:
+        source_url = "https://maps.app.goo.gl/example"
+        canonical_url = "https://www.google.com/maps/placelists/list/list-id"
+        preload_path = "/maps/preview/entitylist/getlist?pb=%213e2%214i500"
+        fake_requests = _FakeCurlRequests([
+            _FakeHttpResponse(text="<html>Opening Maps</html>", url=source_url),
+            _FakeHttpResponse(
+                text=f'<link rel="preload" as="fetch" href="{preload_path}">',
+                url=canonical_url,
+            ),
+            _FakeHttpResponse(
+                text=self._make_entitylist_payload(range(2), 2),
+                url=f"https://www.google.com{preload_path}",
+            ),
+        ])
+
+        with (
+            patch("gmaps_scraper.scraper._import_curl_requests", return_value=fake_requests),
+            patch.object(
+                _FakeHttpSession,
+                "head",
+                create=True,
+                return_value=_FakeHttpResponse(text="", url=canonical_url),
+            ) as head,
+        ):
+            _, result = collect_saved_list_result(source_url, collection_mode="curl")
+
+        head.assert_called_once_with(source_url, headers={"User-Agent": "gmaps-scraper"})
+        self.assertEqual(result.source_url, source_url)
+        self.assertEqual(result.resolved_url, canonical_url)
+        self.assertEqual(len(result.places), 2)
+        self.assertEqual(fake_requests.sessions[0].calls[-1], (
+            f"https://www.google.com{preload_path}", {"referer": canonical_url},
+        ))
 
     def test_collect_http_artifacts_returns_html_without_preload(self) -> None:
         fake_requests = _FakeCurlRequests(
@@ -737,7 +917,7 @@ class SavedListFallbackTests(unittest.TestCase):
             script_texts=["browser-script"],
             html="<html></html>",
         )
-        parsed = Mock()
+        parsed = Mock(diagnostics=SavedListExtractionDiagnostics("runtime_state", True))
 
         with (
             patch("gmaps_scraper.scraper.collect_http_artifacts", return_value=http_artifacts),
@@ -754,6 +934,8 @@ class SavedListFallbackTests(unittest.TestCase):
 
         self.assertIs(artifacts, browser_artifacts)
         self.assertIs(result, parsed)
+        self.assertEqual(result.diagnostics.collection_source, "browser")
+        self.assertTrue(result.diagnostics.used_browser_fallback)
         collect_browser_artifacts.assert_called_once()
 
     def test_collect_saved_list_result_uses_browser_only_mode(self) -> None:

@@ -105,6 +105,15 @@ uv run gmaps-scraper URL --fetch-mode browser
 Use `auto` or `browser` for place scraping. Both use the browser. The `curl`
 mode is available for saved lists only.
 
+Saved-list JSON includes `diagnostics` with the collector and source artifact,
+browser fallback status, and whether the HTTP preload was expanded or
+paginated. When Google reports a row total, `loaded_rows` and `expected_rows`
+count raw saved-list entries before parsing and deduplication. Check
+`quality_flags` for `partial_payload` before replacing previously saved results.
+`fewer_places_than_loaded_rows` marks a difference between the raw and parsed
+counts, including when deduplication merges rows.
+Missing addresses, CIDs, or a list ID are reported separately.
+
 ## Batch Saved-List Scraping
 
 Pass multiple saved-list URLs or use `--input` with a newline-delimited file.

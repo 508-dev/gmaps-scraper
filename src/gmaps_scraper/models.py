@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 type AddressParts = list[str | list[str]]
 
@@ -111,6 +111,39 @@ class Place:
         return result
 
 
+type SavedListArtifactSource = Literal["runtime_state", "script_texts", "html"]
+type SavedListCollectionSource = Literal["http", "browser"]
+
+
+@dataclass(slots=True)
+class SavedListExtractionDiagnostics:
+    """Provenance and quality signals for a parsed Google Maps saved list."""
+
+    artifact_source: SavedListArtifactSource
+    runtime_state_present: bool
+    collection_source: SavedListCollectionSource | None = None
+    used_browser_fallback: bool = False
+    preload_expanded: bool = False
+    preload_paginated: bool = False
+    loaded_rows: int | None = None
+    expected_rows: int | None = None
+    quality_flags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        """Convert diagnostics into a JSON-serializable dictionary."""
+        return {
+            "artifact_source": self.artifact_source,
+            "runtime_state_present": self.runtime_state_present,
+            "collection_source": self.collection_source,
+            "used_browser_fallback": self.used_browser_fallback,
+            "preload_expanded": self.preload_expanded,
+            "preload_paginated": self.preload_paginated,
+            "loaded_rows": self.loaded_rows,
+            "expected_rows": self.expected_rows,
+            "quality_flags": list(self.quality_flags),
+        }
+
+
 @dataclass(slots=True)
 class SavedList:
     """A parsed Google Maps saved list."""
@@ -123,10 +156,11 @@ class SavedList:
     places: list[Place]
     owner: ListOwner | None = None
     collaborators: list[ListOwner] = field(default_factory=list)
+    diagnostics: SavedListExtractionDiagnostics | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Convert a saved list into a JSON-serializable dictionary."""
-        return {
+        result: dict[str, object] = {
             "source_url": self.source_url,
             "resolved_url": self.resolved_url,
             "list_id": self.list_id,
@@ -138,6 +172,9 @@ class SavedList:
             ],
             "places": [place.to_dict() for place in self.places],
         }
+        if self.diagnostics is not None:
+            result["diagnostics"] = self.diagnostics.to_dict()
+        return result
 
 
 @dataclass(slots=True)

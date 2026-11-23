@@ -102,6 +102,9 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.list_id, "TESTLISTABC123456789")
         self.assertEqual(parsed.title, "Sample Coffee Stops")
         self.assertEqual(parsed.description, "Curated fixture data for parser tests")
+        assert parsed.diagnostics is not None
+        self.assertEqual(parsed.diagnostics.artifact_source, "runtime_state")
+        self.assertTrue(parsed.diagnostics.runtime_state_present)
         self.assertEqual(
             parsed.owner.to_dict() if parsed.owner else None,
             {
@@ -144,6 +147,60 @@ class ParserTests(unittest.TestCase):
             },
         )
         self.assertFalse(parsed.places[1].is_favorite)
+
+    def test_reads_inline_initialization_state_from_html(self) -> None:
+        html = (
+            '<html><head><script type="text/javascript">'
+            f"window.APP_INITIALIZATION_STATE={json.dumps(['noise', _LIST_NODE])};"
+            "</script></head><body>Map</body></html>"
+        )
+
+        parsed = parse_saved_list_artifacts(_LIST_URL, html=html)
+
+        self.assertEqual(
+            [place.name for place in parsed.places], ["Northwind Cafe", "Harbor Bakery"],
+        )
+        assert parsed.diagnostics is not None
+        self.assertEqual(parsed.diagnostics.artifact_source, "html")
+        self.assertFalse(parsed.diagnostics.runtime_state_present)
+        self.assertIsNone(parsed.diagnostics.collection_source)
+
+    def test_reports_missing_fields_without_claiming_payload_is_partial(self) -> None:
+        list_node = copy.deepcopy(_LIST_NODE)
+        list_node[0] = None
+        list_node[2] = None
+        metadata = list_node[8][0][1]
+        metadata[4] = None
+        metadata[6] = None
+
+        parsed = parse_saved_list_artifacts("https://www.google.com/maps", runtime_state=list_node)
+
+        assert parsed.diagnostics is not None
+        self.assertEqual(
+            parsed.diagnostics.quality_flags,
+            ["missing_list_id", "missing_address", "missing_cid"],
+        )
+        self.assertIsNone(parsed.diagnostics.expected_rows)
+
+    def test_flags_fewer_places_than_loaded_rows_after_parsing(self) -> None:
+        for case, extra_row in (
+            ("duplicate", _LIST_NODE[8][0]),
+            ("unparseable", [None, None, "Removed place"]),
+        ):
+            with self.subTest(case=case):
+                list_node = copy.deepcopy(_LIST_NODE)
+                list_node[8].append(copy.deepcopy(extra_row))
+                list_node.extend([None, None, None, 3])
+
+                parsed = parse_saved_list_artifacts(_LIST_URL, runtime_state=list_node)
+
+                self.assertEqual(len(parsed.places), 2)
+                assert parsed.diagnostics is not None
+                self.assertEqual(parsed.diagnostics.loaded_rows, 3)
+                self.assertEqual(parsed.diagnostics.expected_rows, 3)
+                self.assertEqual(
+                    parsed.diagnostics.quality_flags, ["fewer_places_than_loaded_rows"],
+                )
 
     def test_keeps_header_owner_first_when_collecting_collaborators(self) -> None:
         runtime_state = copy.deepcopy(["noise", _LIST_NODE])

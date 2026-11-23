@@ -11,15 +11,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookiejar import LoadError, MozillaCookieJar
 from pathlib import Path
-from typing import Any, Literal, Required, TypedDict
-from urllib.parse import urljoin
+from typing import Any, Literal, Required, TypedDict, cast
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from gmaps_scraper.browser_humanization import (
     BrowserWindowSize,
     resolve_browser_window_size,
 )
-from gmaps_scraper.models import SavedList, SavedListScrapeResult
-from gmaps_scraper.parser import JSONValue, ParseError, parse_saved_list_artifacts
+from gmaps_scraper.models import SavedList, SavedListCollectionSource, SavedListScrapeResult
+from gmaps_scraper.parser import (
+    JSONValue,
+    ParseError,
+    _entitylist_row_counts,
+    _extract_script_texts_from_html,
+    parse_saved_list_artifacts,
+)
+from gmaps_scraper.url_tools import extract_list_id_from_text
 
 type CollectionMode = Literal["auto", "curl", "browser"]
 
@@ -31,11 +38,11 @@ _HTML_ATTRIBUTE_PATTERN = re.compile(
     r"""\b([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(['"])(.*?)\2""",
     re.DOTALL,
 )
-_SCRIPT_TEXT_PATTERN = re.compile(
-    r"<script\b[^>]*>(.*?)</script>",
-    re.IGNORECASE | re.DOTALL,
-)
 _ENTITYLIST_PAGE_SIZE_PATTERN = re.compile(r"(%214i|!4i)(\d+)")
+_ENTITYLIST_PAGE_SIZE_LIMIT = 500
+_ENTITYLIST_CONTINUATION_ANCHOR = re.compile(r"(!3e\d+!4i)(\d+)(?=!|$)")
+_ENTITYLIST_CURSOR_PATTERN = re.compile(r"[A-Za-z0-9+/_-]+={0,2}")
+_ENTITYLIST_CURSOR_TRANSLATION = str.maketrans("+/", "-_")
 _CONSENT_TEXT_MARKERS = (
     "before you continue to google",
     "prima di continuare su google",
@@ -75,12 +82,24 @@ _MORE_OPTIONS_BUTTON_LABELS = (
 
 @dataclass(slots=True)
 class BrowserArtifacts:
-    """Artifacts collected from a browser session."""
+    """Artifacts collected over HTTP or in a browser."""
 
     resolved_url: str | None
     runtime_state: JSONValue | None
     script_texts: list[str]
     html: str
+    preload_expanded: bool = False
+    preload_paginated: bool = False
+
+
+@dataclass(slots=True)
+class _EntitylistPage:
+    payload: list[JSONValue]
+    header: list[JSONValue]
+    rows: list[JSONValue]
+    list_id: str
+    total_rows: int
+    cursor: str | None
 
 
 class BrowserProxyConfig(TypedDict, total=False):
@@ -200,6 +219,7 @@ def collect_saved_list_result(
         return artifacts, _parse_saved_list(
             list_url,
             artifacts=artifacts,
+            collection_source="browser",
         )
 
     if normalized_mode == "curl":
@@ -211,6 +231,7 @@ def collect_saved_list_result(
         return artifacts, _parse_saved_list(
             list_url,
             artifacts=artifacts,
+            collection_source="http",
         )
 
     try:
@@ -222,6 +243,7 @@ def collect_saved_list_result(
         return artifacts, _parse_saved_list(
             list_url,
             artifacts=artifacts,
+            collection_source="http",
         )
     except (ParseError, ScrapeError):
         artifacts = collect_browser_artifacts(
@@ -234,6 +256,8 @@ def collect_saved_list_result(
         return artifacts, _parse_saved_list(
             list_url,
             artifacts=artifacts,
+            collection_source="browser",
+            used_browser_fallback=True,
         )
 
 
@@ -241,14 +265,22 @@ def _parse_saved_list(
     list_url: str,
     *,
     artifacts: BrowserArtifacts,
+    collection_source: SavedListCollectionSource,
+    used_browser_fallback: bool = False,
 ) -> SavedList:
-    return parse_saved_list_artifacts(
+    parsed = parse_saved_list_artifacts(
         list_url,
         resolved_url=artifacts.resolved_url,
         runtime_state=artifacts.runtime_state,
         script_texts=artifacts.script_texts,
         html=artifacts.html,
     )
+    if parsed.diagnostics is not None:
+        parsed.diagnostics.collection_source = collection_source
+        parsed.diagnostics.used_browser_fallback = used_browser_fallback
+        parsed.diagnostics.preload_expanded = artifacts.preload_expanded
+        parsed.diagnostics.preload_paginated = artifacts.preload_paginated
+    return parsed
 
 
 def collect_http_artifacts(
@@ -272,11 +304,19 @@ def collect_http_artifacts(
     if http_session is not None and http_session.proxy is not None:
         session_kwargs["proxy"] = http_session.proxy
 
+    preload_expanded = False
+    preload_paginated = False
     try:
         with curl_requests.Session(**session_kwargs) as session:
             response = session.get(list_url)
             _raise_for_status(response)
             resolved_url = _normalize_response_url(getattr(response, "url", None))
+            if resolved_url is not None and urlsplit(resolved_url).hostname == "maps.app.goo.gl":
+                canonical_url = _resolve_saved_list_short_link(session, resolved_url)
+                if canonical_url is not None:
+                    response = session.get(canonical_url)
+                    _raise_for_status(response)
+                    resolved_url = _normalize_response_url(getattr(response, "url", None))
             page_html = _response_text(response)
             script_texts = _extract_script_texts_from_html(page_html)
             preload_url = _extract_preloaded_fetch_url(
@@ -296,14 +336,14 @@ def collect_http_artifacts(
                 else:
                     preload_text = _response_text(preload_response)
                     if preload_text.strip():
-                        expanded_preload_text = _expand_entitylist_preload_text(
-                            session,
-                            preload_url=preload_url,
-                            preload_text=preload_text,
-                            referer=resolved_url or list_url,
+                        preload_text, preload_expanded, preload_paginated = (
+                            _complete_entitylist_preload(
+                                session,
+                                preload_url=preload_url,
+                                preload_text=preload_text,
+                                referer=resolved_url or list_url,
+                            )
                         )
-                        if expanded_preload_text is not None:
-                            preload_text = expanded_preload_text
                         script_texts.append(preload_text)
     except Exception as exc:  # pragma: no cover - network error path
         raise ScrapeError(f"Failed to collect HTTP artifacts: {exc}") from exc
@@ -315,6 +355,8 @@ def collect_http_artifacts(
         runtime_state=None,
         script_texts=script_texts,
         html=page_html,
+        preload_expanded=preload_expanded,
+        preload_paginated=preload_paginated,
     )
 
 
@@ -607,12 +649,23 @@ def _save_http_cookie_jar(
     cookie_jar.save(ignore_discard=True, ignore_expires=True)
 
 
-def _extract_script_texts_from_html(page_html: str) -> list[str]:
-    return [
-        match.group(1)
-        for match in _SCRIPT_TEXT_PATTERN.finditer(page_html)
-        if match.group(1).strip()
-    ]
+def _resolve_saved_list_short_link(session: Any, url: str) -> str | None:
+    # Some short links return a JavaScript interstitial to browser-identified GET requests.
+    try:
+        response = session.head(url, headers={"User-Agent": "gmaps-scraper"})
+        _raise_for_status(response)
+    except Exception:
+        return None
+    target = _normalize_response_url(getattr(response, "url", None))
+    if target is not None:
+        parts = urlsplit(target)
+        if (
+            parts.scheme == "https"
+            and parts.hostname in {"www.google.com", "maps.google.com"}
+            and extract_list_id_from_text(target) is not None
+        ):
+            return target
+    return None
 
 
 def _extract_preloaded_fetch_url(
@@ -639,66 +692,183 @@ def _extract_preloaded_fetch_url(
     return candidates[0]
 
 
-def _expand_entitylist_preload_text(
+def _complete_entitylist_preload(
     session: Any,
     *,
     preload_url: str,
     preload_text: str,
     referer: str,
+) -> tuple[str, bool, bool]:
+    first_page = _parse_entitylist_page(preload_text)
+    if first_page is None or len(first_page.rows) >= first_page.total_rows:
+        return preload_text, False, False
+
+    attempted_urls: set[str] = set()
+    paginated_text = _paginate_entitylist_preload(
+        session,
+        preload_url=preload_url,
+        first_page=first_page,
+        referer=referer,
+        attempted_urls=attempted_urls,
+    )
+    if paginated_text is not None:
+        return paginated_text, False, True
+
+    expanded = _expand_entitylist_preload(
+        session, preload_url=preload_url, first_page=first_page, referer=referer,
+    )
+    if expanded is None:
+        return preload_text, False, False
+
+    expanded_url, expanded_text, expanded_page = expanded
+    paginated_text = _paginate_entitylist_preload(
+        session,
+        preload_url=expanded_url,
+        first_page=expanded_page,
+        referer=referer,
+        attempted_urls=attempted_urls,
+    )
+    return paginated_text or expanded_text, True, paginated_text is not None
+
+
+def _paginate_entitylist_preload(
+    session: Any,
+    *,
+    preload_url: str,
+    first_page: _EntitylistPage,
+    referer: str,
+    attempted_urls: set[str],
 ) -> str | None:
-    response_counts = _extract_entitylist_response_counts(preload_text)
-    if response_counts is None:
+    if first_page.cursor is None or len(first_page.rows) >= first_page.total_rows:
         return None
+    rows = list(first_page.rows)
+    seen_rows = {_entitylist_row_key(row) for row in rows}
+    cursor = first_page.cursor
+    while cursor is not None and len(rows) < first_page.total_rows:
+        next_url = _entitylist_continuation_url(preload_url, cursor)
+        if next_url is None or next_url in attempted_urls:
+            break
+        attempted_urls.add(next_url)
 
-    loaded_rows, total_rows = response_counts
-    if total_rows <= loaded_rows:
+        text = _fetch_entitylist_text(session, url=next_url, referer=referer)
+        page = _parse_entitylist_page(text) if text is not None else None
+        if (
+            page is None
+            or page.list_id != first_page.list_id
+            or page.total_rows != first_page.total_rows
+            or not page.rows
+            or len(rows) + len(page.rows) > first_page.total_rows
+        ):
+            break
+
+        page_keys = {_entitylist_row_key(row) for row in page.rows}
+        if seen_rows & page_keys:
+            break
+        rows.extend(page.rows)
+        seen_rows.update(page_keys)
+        cursor = page.cursor
+
+    if len(rows) == len(first_page.rows):
         return None
+    # The parser selects one artifact. Present the combined rows under the original header.
+    first_page.header[8] = rows
+    first_page.payload[1] = cursor or ""
+    return ")]}'\n" + json.dumps(first_page.payload, ensure_ascii=False, separators=(",", ":"))
 
-    expanded_preload_url = _replace_entitylist_page_size(preload_url, total_rows)
-    if expanded_preload_url is None or expanded_preload_url == preload_url:
+
+def _expand_entitylist_preload(
+    session: Any,
+    *,
+    preload_url: str,
+    first_page: _EntitylistPage,
+    referer: str,
+) -> tuple[str, str, _EntitylistPage] | None:
+    page_size = min(first_page.total_rows, _ENTITYLIST_PAGE_SIZE_LIMIT)
+    if page_size <= len(first_page.rows):
         return None
-
-    try:
-        expanded_response = session.get(
-            expanded_preload_url,
-            referer=referer,
+    expanded_url = _replace_entitylist_page_size(preload_url, page_size)
+    if expanded_url is None or expanded_url == preload_url:
+        return None
+    text = _fetch_entitylist_text(session, url=expanded_url, referer=referer)
+    if text is None:
+        return None
+    expanded = _parse_entitylist_page(text)
+    if (
+        expanded is None
+        or expanded.list_id != first_page.list_id
+        or expanded.total_rows != first_page.total_rows
+        or len(expanded.rows) <= len(first_page.rows)
+        or not {_entitylist_row_key(row) for row in first_page.rows}.issubset(
+            _entitylist_row_key(row) for row in expanded.rows
         )
-        _raise_for_status(expanded_response)
+    ):
+        return None
+    return expanded_url, text, expanded
+
+
+def _fetch_entitylist_text(session: Any, *, url: str, referer: str) -> str | None:
+    try:
+        response = session.get(url, referer=referer)
+        _raise_for_status(response)
     except Exception:
         return None
+    return _response_text(response)
 
-    expanded_text = _response_text(expanded_response)
-    if not expanded_text.strip():
+
+def _entitylist_continuation_url(preload_url: str, cursor: str) -> str | None:
+    parts = urlsplit(preload_url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    pb_indexes = [index for index, (name, _) in enumerate(query) if name == "pb"]
+    if len(pb_indexes) != 1:
         return None
-    return expanded_text
-
-
-def _extract_entitylist_response_counts(preload_text: str) -> tuple[int, int] | None:
-    candidate = _extract_entitylist_payload(preload_text)
-    if candidate is None:
+    index = pb_indexes[0]
+    _, pb = query[index]
+    if "!5B" in pb:
         return None
-
-    rows = candidate[8]
-    total = candidate[12]
-    if not isinstance(rows, list) or not isinstance(total, int):
+    # Maps sends the response cursor as field 5B in URL-safe base64.
+    cursor = cursor.translate(_ENTITYLIST_CURSOR_TRANSLATION).rstrip("=")
+    if (size := _ENTITYLIST_CONTINUATION_ANCHOR.search(pb)) is None:
         return None
-    return len(rows), total
+    page_size = min(int(size[2]), _ENTITYLIST_PAGE_SIZE_LIMIT)
+    query[index] = ("pb", f"{pb[:size.start()]}{size[1]}{page_size}!5B{cursor}{pb[size.end():]}")
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
-def _extract_entitylist_payload(preload_text: str) -> list[Any] | None:
+def _parse_entitylist_page(preload_text: str) -> _EntitylistPage | None:
     normalized = preload_text.strip()
     if normalized.startswith(")]}'"):
         normalized = normalized[4:].lstrip()
     try:
-        payload = json.loads(normalized)
+        payload = cast(JSONValue, json.loads(normalized))
     except json.JSONDecodeError:
         return None
     if not isinstance(payload, list) or not payload:
         return None
-    candidate = payload[0]
-    if not isinstance(candidate, list) or len(candidate) <= 12:
+    header = payload[0]
+    counts = _entitylist_row_counts(header)
+    if counts is None or not isinstance(header, list):
         return None
-    return candidate
+    identity = header[0]
+    rows = header[8]
+    if (
+        not isinstance(identity, list)
+        or not identity
+        or not isinstance(identity[0], str)
+        or not identity[0]
+        or not isinstance(rows, list)
+    ):
+        return None
+    cursor = payload[1] if len(payload) > 1 else None
+    if not isinstance(cursor, str) or _ENTITYLIST_CURSOR_PATTERN.fullmatch(cursor) is None:
+        cursor = None
+    return _EntitylistPage(payload, header, rows, identity[0], counts[1], cursor)
+
+
+def _entitylist_row_key(row: JSONValue) -> str:
+    # The saved item identity is independent of display strings and user notes on the row.
+    if isinstance(row, list) and len(row) > 8 and isinstance(row[8], list) and row[8]:
+        row = row[8]
+    return json.dumps(row, sort_keys=True, separators=(",", ":"))
 
 
 def _replace_entitylist_page_size(preload_url: str, page_size: int) -> str | None:
