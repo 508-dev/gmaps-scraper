@@ -4,7 +4,8 @@ import json
 import re
 import tempfile
 import unittest
-from http.cookiejar import Cookie
+from hashlib import sha256
+from http.cookiejar import Cookie, LoadError
 from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
@@ -473,6 +474,26 @@ class ScraperConsentTests(unittest.TestCase):
 
         self.assertEqual(page.clicked, ["Rifiuta tutto"])
 
+    def test_rejects_cookies_after_opening_more_options(self) -> None:
+        class _TwoStepConsent(_FakeContext):
+            def dismiss_consent(self) -> None:
+                if self.clicked[-1] == "More options":
+                    self.buttons = ["Reject all", "Accept all"]
+                else:
+                    super().dismiss_consent()
+
+        page = _TwoStepConsent(
+            text="Before you continue to Google",
+            buttons=["More options", "Accept all"],
+        )
+        with self.assertLogs("gmaps_scraper.scraper", level="DEBUG") as logs:
+            _handle_google_consent(page, timeout_ms=5_000)
+
+        self.assertEqual(page.clicked, ["More options", "Reject all"])
+        self.assertEqual(page.timeouts[0], 500)
+        self.assertFalse(_has_google_consent_screen(page))
+        self.assertIn("Opened More options", " ".join(logs.output))
+
     def test_rejects_cookies_from_iframe(self) -> None:
         frame = _FakeContext(
             text="Google\nPrima di continuare su Google\nRifiuta tutto\nAccetta tutto",
@@ -508,6 +529,45 @@ class ScraperConsentTests(unittest.TestCase):
 
 
 class HttpArtifactTests(unittest.TestCase):
+    def test_primary_http_failure_is_wrapped_and_logs_only_safe_context(self) -> None:
+        source_url = "https://maps.app.goo.gl/example?token=private-value"
+        failure = ConnectionError("connection failed with private-value")
+        curl_requests = unittest.mock.MagicMock()
+        session = curl_requests.Session.return_value.__enter__.return_value
+        session.get.side_effect = failure
+        with (
+            patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl_requests),
+            self.assertLogs("gmaps_scraper.scraper", level="WARNING") as logs,
+            self.assertRaisesRegex(ScrapeError, "Failed to collect HTTP artifacts") as raised,
+        ):
+            collect_http_artifacts(source_url, timeout_ms=3000)
+
+        self.assertIs(raised.exception.__cause__, failure)
+        session.get.assert_called_once_with(source_url)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("ConnectionError", logs.output[0])
+        self.assertNotIn("private-value", logs.output[0])
+        self.assertEqual(logs.records[0].source_url_hash, sha256(source_url.encode()).hexdigest())
+
+    def test_invalid_cookie_jar_stops_collection_with_a_load_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            jar_path = Path(directory) / "cookies.txt"
+            jar_path.write_text("This is not a Netscape cookie jar.", encoding="utf-8")
+            with (
+                patch("gmaps_scraper.scraper._import_curl_requests") as curl_requests,
+                self.assertLogs("gmaps_scraper.scraper", level="WARNING") as logs,
+                self.assertRaisesRegex(ScrapeError, "Failed to load HTTP cookie jar") as raised,
+            ):
+                collect_http_artifacts(
+                    "https://maps.app.goo.gl/example",
+                    timeout_ms=3000,
+                    http_session=HttpSessionConfig(cookie_jar_path=jar_path),
+                )
+
+            curl_requests.return_value.Session.assert_not_called()
+        self.assertIsInstance(raised.exception.__cause__, LoadError)
+        self.assertNotIn(str(jar_path), logs.output[0])
+
     def test_collect_http_artifacts_fetches_preloaded_payload(self) -> None:
         script_text = '\n  window.APP_INITIALIZATION_STATE=["A &amp; B"];\n'
         fake_requests = _FakeCurlRequests(

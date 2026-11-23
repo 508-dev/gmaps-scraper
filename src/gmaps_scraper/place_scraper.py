@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import statistics
 import time
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
+from gmaps_scraper._logging import url_log_fields
 from gmaps_scraper.models import (
     PLACE_LLM_DISPLAY_TRANSLATION_FIELDS,
     PLACE_LLM_DOM_REPAIR_FIELDS,
@@ -50,6 +52,9 @@ from gmaps_scraper.scraper import (
 )
 from gmaps_scraper.translation_memory import TranslationMemory, needs_display_en
 from gmaps_scraper.url_tools import extract_list_id
+
+_logger = logging.getLogger(__name__)
+
 
 _TITLE_SELECTORS = ("h1.DUwDvf", "h1.lfPIob", "div[role='main'] h1")
 _TITLE_SELECTOR = ", ".join(_TITLE_SELECTORS)
@@ -1358,6 +1363,11 @@ def _build_place_details_from_snapshot(
             )
         )
     except Exception as exc:
+        _logger.warning(
+            "Place repair failed error_type=%s",
+            type(exc).__name__,
+            extra=url_log_fields(place_url, resolved_url),
+        )
         details.diagnostics.llm_error = str(exc)
         details.diagnostics.prompt_version = _PLACE_LLM_PROMPT_VERSION
         return details
@@ -1603,8 +1613,18 @@ def _scrape_place_with_context_and_retries(
             last_error = "quality flags: " + ", ".join(
                 place.diagnostics.quality_flags if place.diagnostics is not None else []
             )
-        if attempts <= max_retries and retry_backoff_ms > 0:
-            time.sleep((retry_backoff_ms * attempts) / 1000)
+        if attempts <= max_retries:
+            delay_ms = max(0, retry_backoff_ms * attempts)
+            _logger.warning(
+                "Retrying place scrape attempt=%s next_attempt=%s delay_ms=%s",
+                attempts,
+                attempts + 1,
+                delay_ms,
+                extra=url_log_fields(place_url),
+            )
+            if delay_ms:
+                time.sleep(delay_ms / 1000)
+    _logger.error("Place scrape exhausted attempts=%s", attempts, extra=url_log_fields(place_url))
     return PlaceScrapeResult(
         source_url=place_url,
         place=last_place,
@@ -1677,6 +1697,9 @@ def _collect_place_snapshot_with_context(
     screenshot_path: Path | None,
     overview_screenshot_path: Path | None,
 ) -> dict[str, object]:
+    _logger.debug(
+        "Starting place collection timeout_ms=%s", timeout_ms, extra=url_log_fields(place_url)
+    )
     page = None
     try:
         page = context.new_page()
@@ -2834,7 +2857,12 @@ def _collect_preview_place_enrichment(
             preload_response = session.get(preload_url, referer=base_url)
             _raise_for_status(preload_response)
             payload_text = _response_text(preload_response)
-    except Exception:
+    except Exception as exc:
+        _logger.warning(
+            "Place preview fetch failed error_type=%s",
+            type(exc).__name__,
+            extra=url_log_fields(place_url, resolved_url),
+        )
         return {}
     finally:
         _save_http_cookie_jar(http_session, cookie_jar)

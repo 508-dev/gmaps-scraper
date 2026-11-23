@@ -50,6 +50,7 @@ Pass URLs as positional arguments, through `--input`, or both.
 | `-h`, `--help` | Off | Print CLI help and exit. |
 | `--kind {list,place}` | `list` | Select saved-list or place scraping. |
 | `--output PATH` | Standard output | Write JSON to a file. |
+| `--log-level {DEBUG,INFO,WARNING,ERROR}` | Off | Write scraper logs at the selected level to standard error. |
 | `--download-photo PATH` | Off | Download the representative photo for a single place. |
 | `--download-main-photo PATH` | Off | Download the main photo for a single place. |
 | `--show-browser-window`, `--headed` | Off | Show the browser window. |
@@ -198,9 +199,14 @@ Parallel workers get separate browser profile subdirectories under
 when the goal is a single long-lived browser identity. Use higher concurrency
 when separate worker session state is acceptable.
 
-## Debug Artifacts
+## Logs and Debug Artifacts
 
-Write place debug artifacts and a compact selector recipe:
+Use `--log-level INFO` to see scraper activity on stderr while stdout remains
+JSON. `DEBUG` adds details about browser operations and consent handling.
+URL hashes correlate events for the same input and resolved URL.
+Python callers can configure loggers under `gmaps_scraper` with standard logging.
+
+Use `--debug-output-dir` to write place debug artifacts to a specific directory.
 
 ```bash
 uv run gmaps-scraper URL \
@@ -209,9 +215,17 @@ uv run gmaps-scraper URL \
 ```
 
 `--screenshot-output-dir` writes overview and reviews screenshots. Debug dumps
-also include raw investigation artifacts under `artifacts/` and a compact
-`selector-recipe.json`. Reuse selector recipes across sessions, not full DOM
-snapshots.
+include extraction snapshots under `artifacts/`, the final place output,
+diagnostics, and LLM evidence.
+
+Current selectors live in the overview extractor and panel helpers.
+[Overview extractor](../src/gmaps_scraper/data/place_extractor.js) and
+[panel helpers](../src/gmaps_scraper/place_scraper.py).
+
+The `selector-recipe.json` artifact and its manifest entry have been retired.
+The deprecated selector recipe helpers still read and write legacy recipes for
+offline use. For tools that expect the archived v1 file, call
+`write_default_place_selector_recipe(path)`.
 
 Reviews and About collection are enabled by default for place scraping. Use
 `--skip-reviews` when you only need overview facts and do not want to open the

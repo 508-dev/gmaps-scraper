@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from collections.abc import Mapping, Sequence
@@ -71,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scrape a list or an individual place page.",
     )
     parser.add_argument("--output", type=Path, help="Optional JSON output path")
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Show scraper logs on stderr at the chosen level.",
+    )
     parser.add_argument(
         "--download-photo",
         type=Path,
@@ -253,6 +259,17 @@ def main() -> int:
     """Run the CLI."""
     parser = build_parser()
     args = parser.parse_args()
+    if args.log_level:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter(
+                "%(levelname)s %(name)s %(message)s "
+                "source_url_hash=%(source_url_hash)s resolved_url_hash=%(resolved_url_hash)s",
+                defaults={"source_url_hash": None, "resolved_url_hash": None},
+            )
+        )
+        logging.basicConfig(handlers=[handler])
+        logging.getLogger("gmaps_scraper").setLevel(args.log_level)
     if not args.urls and args.input is None:
         parser.error("at least one URL or --input is required.")
     max_retries = args.max_retries
