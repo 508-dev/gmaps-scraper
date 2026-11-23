@@ -40,15 +40,6 @@ Run with a visible browser for debugging:
 uv run gmaps-scraper URL --kind place --headed
 ```
 
-Place output includes `opening_hours` when Google Maps supplies a complete
-seven-day schedule in the Overview panel. Each entry has a localized `day` and
-an `hours` array that preserves each displayed interval or closure label. The
-scraper includes `is_open_24h` for recognized all-day or closed labels.
-The schedule follows Google's display order and can include holiday changes.
-The `status` field still reports the current open or closed message. The
-`opening_hours_incomplete` quality flag indicates that the scraper found
-schedule rows but could not validate all seven days.
-
 ## Fetch Modes
 
 ```bash
@@ -421,6 +412,17 @@ evidence. JSON omits `cid` when it is unavailable.
 `gl` is a regional search bias, not proof of location. Downstream consumers that
 have expected city/country context should still validate the resolved place
 address or coordinates before accepting a refresh.
+
+## Weekly opening hours
+
+Place output includes `opening_hours` when Google Maps supplies a complete
+seven-day schedule in the Overview panel. Each entry has a localized `day` and
+an `hours` array that preserves each displayed interval or closure label. The
+scraper includes `is_open_24h` for recognized all-day or closed labels.
+The schedule follows Google's display order and can include holiday changes.
+The `status` field still reports the current open or closed message. The
+`opening_hours_incomplete` quality flag indicates that the scraper found
+schedule rows but could not validate all seven days.
 
 ## Public API
 
