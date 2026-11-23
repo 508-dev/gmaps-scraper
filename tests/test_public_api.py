@@ -19,6 +19,7 @@ from gmaps_scraper import (
     PlaceScrapeResult,
     ReviewTopic,
     SavedList,
+    SavedListScrapeResult,
     ScrapeError,
     build_maps_search_url,
     cached_place_repairer,
@@ -34,6 +35,7 @@ from gmaps_scraper import (
     scrape_place,
     scrape_places,
     scrape_saved_list,
+    scrape_saved_lists,
     write_default_place_selector_recipe,
 )
 
@@ -41,6 +43,7 @@ from gmaps_scraper import (
 class PublicApiTests(unittest.TestCase):
     def test_top_level_exports_are_importable(self) -> None:
         self.assertTrue(callable(scrape_saved_list))
+        self.assertTrue(callable(scrape_saved_lists))
         self.assertTrue(callable(scrape_place))
         self.assertTrue(callable(scrape_places))
         self.assertEqual(BrowserSessionConfig.__name__, "BrowserSessionConfig")
@@ -54,6 +57,7 @@ class PublicApiTests(unittest.TestCase):
         self.assertEqual(PlaceLLMRepairRequest.__name__, "PlaceLLMRepairRequest")
         self.assertEqual(PlaceReview.__name__, "PlaceReview")
         self.assertEqual(PlaceScrapeResult.__name__, "PlaceScrapeResult")
+        self.assertEqual(SavedListScrapeResult.__name__, "SavedListScrapeResult")
         self.assertEqual(ReviewTopic.__name__, "ReviewTopic")
         self.assertTrue(issubclass(ParseError, RuntimeError))
         self.assertTrue(issubclass(ScrapeError, RuntimeError))

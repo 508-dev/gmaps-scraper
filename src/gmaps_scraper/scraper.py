@@ -5,6 +5,8 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookiejar import LoadError, MozillaCookieJar
@@ -16,7 +18,7 @@ from gmaps_scraper.browser_humanization import (
     BrowserWindowSize,
     resolve_browser_window_size,
 )
-from gmaps_scraper.models import SavedList
+from gmaps_scraper.models import SavedList, SavedListScrapeResult
 from gmaps_scraper.parser import JSONValue, ParseError, parse_saved_list_artifacts
 
 type CollectionMode = Literal["auto", "curl", "browser"]
@@ -133,6 +135,45 @@ def scrape_saved_list(
         http_session=http_session,
     )
     return result
+
+
+def scrape_saved_lists(
+    list_urls: Sequence[str],
+    *,
+    headless: bool = True,
+    timeout_ms: int = 30_000,
+    settle_time_ms: int = 3_000,
+    collection_mode: CollectionMode = DEFAULT_COLLECTION_MODE,
+    browser_session: BrowserSessionConfig | None = None,
+    http_session: HttpSessionConfig | None = None,
+    stagger_ms: int = 0,
+) -> list[SavedListScrapeResult]:
+    """Scrape saved lists in order and record failures in their per-URL results."""
+    results: list[SavedListScrapeResult] = []
+    urls = [url.strip() for url in list_urls if url.strip()]
+    for index, list_url in enumerate(urls):
+        if index > 0 and stagger_ms > 0:
+            time.sleep(stagger_ms / 1000)
+        try:
+            saved_list = scrape_saved_list(
+                list_url,
+                headless=headless,
+                timeout_ms=timeout_ms,
+                settle_time_ms=settle_time_ms,
+                collection_mode=collection_mode,
+                browser_session=browser_session,
+                http_session=http_session,
+            )
+        except Exception as exc:
+            results.append(
+                SavedListScrapeResult(
+                    source_url=list_url,
+                    error=str(exc) or "Saved-list scrape failed.",
+                )
+            )
+        else:
+            results.append(SavedListScrapeResult(source_url=list_url, saved_list=saved_list))
+    return results
 
 
 def collect_saved_list_result(

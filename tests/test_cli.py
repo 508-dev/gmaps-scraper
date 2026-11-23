@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -14,7 +14,7 @@ from gmaps_scraper.cli import (
     _scrape_place_for_debug,
     main,
 )
-from gmaps_scraper.models import PlaceDetails, PlaceScrapeResult
+from gmaps_scraper.models import PlaceDetails, PlaceScrapeResult, SavedList, SavedListScrapeResult
 from gmaps_scraper.scraper import (
     BrowserArtifacts,
     BrowserSessionConfig,
@@ -117,6 +117,96 @@ class CliTests(unittest.TestCase):
             browser_session=None,
             http_session=None,
         )
+
+    def test_list_batch_accepts_multiple_urls_and_stdin(self) -> None:
+        urls = ["https://maps.app.goo.gl/example-a", "https://maps.app.goo.gl/example-b"]
+        saved_list = SavedList(urls[0], None, None, "Sample Coffee Stops", None, [])
+        results = [
+            SavedListScrapeResult(urls[0], saved_list=saved_list),
+            SavedListScrapeResult(urls[1], error="unavailable"),
+        ]
+        cases = [
+            (urls, "", 0),
+            ([urls[0], "--input", "-", "--fail-on-error"], f"# comment\n\n{urls[1]}\n", 1),
+        ]
+        for arguments, stdin, expected_status in cases:
+            with self.subTest(arguments=arguments):
+                stdout = io.StringIO()
+                with (
+                    patch("sys.argv", ["gmaps-scraper", *arguments, "--stagger-ms", "250"]),
+                    patch("sys.stdin", io.StringIO(stdin)),
+                    patch("gmaps_scraper.cli.scrape_saved_lists", return_value=results) as scrape,
+                    redirect_stdout(stdout),
+                ):
+                    self.assertEqual(main(), expected_status)
+
+                scrape.assert_called_once_with(
+                    urls,
+                    headless=True,
+                    timeout_ms=30_000,
+                    settle_time_ms=3_000,
+                    collection_mode="auto",
+                    browser_session=None,
+                    http_session=None,
+                    stagger_ms=250,
+                )
+                self.assertEqual(
+                    json.loads(stdout.getvalue()),
+                    {
+                        "results": [
+                            {"source_url": urls[0], "saved_list": saved_list.to_dict()},
+                            {"source_url": urls[1], "error": "unavailable"},
+                        ],
+                    },
+                )
+
+    def test_list_batch_writes_output_file_on_failure_with_one_input_url(self) -> None:
+        url = "https://maps.app.goo.gl/example-a"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_path = Path(tmp_dir) / "lists.txt"
+            output_path = Path(tmp_dir) / "list-results.json"
+            input_path.write_text(f"{url}\n", encoding="utf-8")
+            with (
+                patch(
+                    "sys.argv",
+                    [
+                        "gmaps-scraper",
+                        "--kind",
+                        "list",
+                        "--input",
+                        str(input_path),
+                        "--output",
+                        str(output_path),
+                        "--fail-on-error",
+                    ],
+                ),
+                patch(
+                    "gmaps_scraper.cli.scrape_saved_lists",
+                    return_value=[SavedListScrapeResult(url, error="unavailable")],
+                ) as scrape,
+            ):
+                self.assertEqual(main(), 1)
+
+            self.assertEqual(scrape.call_args.args[0], [url])
+            self.assertEqual(
+                json.loads(output_path.read_text(encoding="utf-8")),
+                {"results": [{"source_url": url, "error": "unavailable"}]},
+            )
+
+    def test_list_batch_rejects_empty_input(self) -> None:
+        stderr = io.StringIO()
+        with (
+            patch("sys.argv", ["gmaps-scraper", "--input", "-"]),
+            patch("sys.stdin", io.StringIO("# no URLs\n\n")),
+            patch("gmaps_scraper.cli.scrape_saved_lists") as scrape,
+            redirect_stderr(stderr),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            main()
+
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("list scraping requires at least one URL", stderr.getvalue())
+        scrape.assert_not_called()
 
     def test_writes_output_file_and_forwards_cli_flags(self) -> None:
         artifacts = _artifacts()

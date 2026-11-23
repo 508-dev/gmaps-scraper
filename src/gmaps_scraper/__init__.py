@@ -24,6 +24,7 @@ from gmaps_scraper.models import (
     PlaceScrapeResult,
     ReviewTopic,
     SavedList,
+    SavedListScrapeResult,
 )
 from gmaps_scraper.parser import ParseError, parse_saved_list_artifacts
 from gmaps_scraper.place_scraper import (
@@ -39,6 +40,7 @@ from gmaps_scraper.scraper import (
     HttpSessionConfig,
     ScrapeError,
     scrape_saved_list,
+    scrape_saved_lists,
 )
 from gmaps_scraper.selector_recipes import (
     default_place_selector_recipe,
@@ -76,6 +78,7 @@ __all__ = [
     "PlaceScrapeResult",
     "ReviewTopic",
     "SavedList",
+    "SavedListScrapeResult",
     "ScrapeError",
     "cached_place_repairer",
     "build_maps_search_url",
@@ -96,5 +99,6 @@ __all__ = [
     "scrape_place",
     "scrape_places",
     "scrape_saved_list",
+    "scrape_saved_lists",
     "write_default_place_selector_recipe",
 ]
