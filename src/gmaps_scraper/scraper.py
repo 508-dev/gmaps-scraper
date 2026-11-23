@@ -5,12 +5,14 @@ from __future__ import annotations
 import html
 import json
 import logging
+import random
 import re
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from http.cookiejar import LoadError, MozillaCookieJar
 from itertools import zip_longest
 from pathlib import Path
@@ -39,6 +41,11 @@ type CollectionMode = Literal["auto", "curl", "browser"]
 
 _CONSENT_URL_MARKERS = ("consent.google", "consent.youtube")
 _HTTP_IMPERSONATE = "chrome"
+_HTTP_GET_MAX_ATTEMPTS = 3
+_HTTP_GET_BACKOFF_BASE_SECONDS = 1.0
+_HTTP_GET_RETRY_AFTER_MAX_SECONDS = 30.0
+_HTTP_GET_MIN_TIMEOUT_SECONDS = 0.001
+_HTTP_GET_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 DEFAULT_COLLECTION_MODE: CollectionMode = "auto"
 _LINK_TAG_PATTERN = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
 _HTML_ATTRIBUTE_PATTERN = re.compile(
@@ -405,13 +412,13 @@ def collect_http_artifacts(
     preload_paginated = False
     try:
         with curl_requests.Session(**session_kwargs) as session:
-            response = session.get(list_url)
+            response = _get_with_retry(session, list_url, timeout=timeout_seconds)
             _raise_for_status(response)
             resolved_url = _normalize_response_url(getattr(response, "url", None))
             if resolved_url is not None and urlsplit(resolved_url).hostname == "maps.app.goo.gl":
                 canonical_url = _resolve_saved_list_short_link(session, resolved_url)
                 if canonical_url is not None:
-                    response = session.get(canonical_url)
+                    response = _get_with_retry(session, canonical_url, timeout=timeout_seconds)
                     _raise_for_status(response)
                     resolved_url = _normalize_response_url(getattr(response, "url", None))
             page_html = _response_text(response)
@@ -423,8 +430,10 @@ def collect_http_artifacts(
             )
             if preload_url is not None:
                 try:
-                    preload_response = session.get(
+                    preload_response = _get_with_retry(
+                        session,
                         preload_url,
+                        timeout=timeout_seconds,
                         referer=resolved_url or list_url,
                     )
                     _raise_for_status(preload_response)
@@ -443,6 +452,7 @@ def collect_http_artifacts(
                                 preload_url=preload_url,
                                 preload_text=preload_text,
                                 referer=resolved_url or list_url,
+                                timeout=timeout_seconds,
                             )
                         )
                         script_texts.append(preload_text)
@@ -816,11 +826,13 @@ def _complete_entitylist_preload(
     preload_url: str,
     preload_text: str,
     referer: str,
+    timeout: float,
 ) -> tuple[str, bool, bool]:
     first_page = _parse_entitylist_page(preload_text)
     if first_page is None or len(first_page.rows) >= first_page.total_rows:
         return preload_text, False, False
 
+    deadline = time.monotonic() + timeout
     attempted_urls: set[str] = set()
     paginated_text = _paginate_entitylist_preload(
         session,
@@ -828,12 +840,17 @@ def _complete_entitylist_preload(
         first_page=first_page,
         referer=referer,
         attempted_urls=attempted_urls,
+        deadline=deadline,
     )
     if paginated_text is not None:
         return paginated_text, False, True
 
     expanded = _expand_entitylist_preload(
-        session, preload_url=preload_url, first_page=first_page, referer=referer,
+        session,
+        preload_url=preload_url,
+        first_page=first_page,
+        referer=referer,
+        deadline=deadline,
     )
     if expanded is None:
         return preload_text, False, False
@@ -845,6 +862,7 @@ def _complete_entitylist_preload(
         first_page=expanded_page,
         referer=referer,
         attempted_urls=attempted_urls,
+        deadline=deadline,
     )
     return paginated_text or expanded_text, True, paginated_text is not None
 
@@ -856,6 +874,7 @@ def _paginate_entitylist_preload(
     first_page: _EntitylistPage,
     referer: str,
     attempted_urls: set[str],
+    deadline: float,
 ) -> str | None:
     if first_page.cursor is None or len(first_page.rows) >= first_page.total_rows:
         return None
@@ -868,7 +887,7 @@ def _paginate_entitylist_preload(
             break
         attempted_urls.add(next_url)
 
-        text = _fetch_entitylist_text(session, url=next_url, referer=referer)
+        text = _fetch_entitylist_text(session, url=next_url, referer=referer, deadline=deadline)
         page = _parse_entitylist_page(text) if text is not None else None
         if (
             page is None
@@ -900,6 +919,7 @@ def _expand_entitylist_preload(
     preload_url: str,
     first_page: _EntitylistPage,
     referer: str,
+    deadline: float,
 ) -> tuple[str, str, _EntitylistPage] | None:
     page_size = min(first_page.total_rows, _ENTITYLIST_PAGE_SIZE_LIMIT)
     if page_size <= len(first_page.rows):
@@ -907,7 +927,7 @@ def _expand_entitylist_preload(
     expanded_url = _replace_entitylist_page_size(preload_url, page_size)
     if expanded_url is None or expanded_url == preload_url:
         return None
-    text = _fetch_entitylist_text(session, url=expanded_url, referer=referer)
+    text = _fetch_entitylist_text(session, url=expanded_url, referer=referer, deadline=deadline)
     if text is None:
         return None
     expanded = _parse_entitylist_page(text)
@@ -924,9 +944,13 @@ def _expand_entitylist_preload(
     return expanded_url, text, expanded
 
 
-def _fetch_entitylist_text(session: Any, *, url: str, referer: str) -> str | None:
+def _fetch_entitylist_text(
+    session: Any, *, url: str, referer: str, deadline: float
+) -> str | None:
     try:
-        response = session.get(url, referer=referer)
+        response = _get_with_retry(
+            session, url, timeout=deadline - time.monotonic(), referer=referer
+        )
         _raise_for_status(response)
     except Exception:
         return None
@@ -1028,6 +1052,117 @@ def _response_text(response: Any) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _get_with_retry(session: Any, url: str, *, timeout: float, **kwargs: Any) -> Any:
+    """GET with bounded retries on transient transport errors, 429, and 5xx.
+
+    The timeout in seconds includes all attempts and retry delays for this GET.
+    The last response or exception is passed through unchanged.
+    """
+    if timeout < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+        raise TimeoutError("Insufficient time to attempt HTTP GET.")
+    deadline = time.monotonic() + timeout
+    remaining = timeout
+    attempt = 1
+    while True:
+        try:
+            response = session.get(url, timeout=remaining, **kwargs)
+        except OSError as exc:
+            if attempt == _HTTP_GET_MAX_ATTEMPTS or not _is_transient_transport_error(exc):
+                raise
+            remaining = _wait_for_http_retry(
+                deadline,
+                _http_get_backoff_seconds(attempt),
+                url=url,
+                next_attempt=attempt + 1,
+                reason=type(exc).__name__,
+            )
+            if remaining < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+                raise
+        else:
+            status_code = getattr(response, "status_code", None)
+            if (
+                attempt == _HTTP_GET_MAX_ATTEMPTS
+                or status_code not in _HTTP_GET_RETRYABLE_STATUS_CODES
+            ):
+                return response
+            retry_after = _parse_retry_after_seconds(response)
+            if retry_after is not None and retry_after > _HTTP_GET_RETRY_AFTER_MAX_SECONDS:
+                return response
+            delay = _http_get_backoff_seconds(attempt) if retry_after is None else retry_after
+            remaining = _wait_for_http_retry(
+                deadline, delay, url=url, next_attempt=attempt + 1, reason=f"HTTP {status_code}",
+            )
+            if remaining < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+                return response
+        attempt += 1
+
+
+def _wait_for_http_retry(
+    deadline: float, delay: float, *, url: str, next_attempt: int, reason: str,
+) -> float:
+    # curl_cffi converts seconds to integer milliseconds. Zero means no timeout.
+    if deadline - time.monotonic() - delay < _HTTP_GET_MIN_TIMEOUT_SECONDS:
+        return 0.0
+    if delay:
+        time.sleep(delay)
+    if deadline - time.monotonic() >= _HTTP_GET_MIN_TIMEOUT_SECONDS:
+        _logger.warning(
+            "Retrying HTTP GET attempt=%d max_attempts=%d delay_seconds=%.3f reason=%s",
+            next_attempt,
+            _HTTP_GET_MAX_ATTEMPTS,
+            delay,
+            reason,
+            extra=url_log_fields(url),
+        )
+    return deadline - time.monotonic()
+
+
+def _is_transient_transport_error(exc: OSError) -> bool:
+    # curl_cffi errors subclass OSError; these ones fail the same way on every
+    # attempt (bad URL, TLS verification, redirect loop, proxy config).
+    if isinstance(exc, ValueError):
+        return False
+    try:
+        from curl_cffi import CurlECode
+        from curl_cffi.requests import exceptions as curl_exceptions
+    except ImportError:  # pragma: no cover - dependency error path
+        return True
+    if isinstance(exc, curl_exceptions.ProxyError):
+        # A CONNECT rejection, such as 407, can carry the same receive error code.
+        return exc.code == CurlECode.RECV_ERROR and "proxy connect aborted" in str(exc).lower()
+    permanent = (
+        curl_exceptions.CertificateVerifyError,
+        curl_exceptions.TooManyRedirects,
+        curl_exceptions.ImpersonateError,
+        curl_exceptions.SessionClosed,
+    )
+    return not isinstance(exc, permanent)
+
+
+def _http_get_backoff_seconds(attempt: int) -> float:
+    ceiling = _HTTP_GET_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+    return random.uniform(ceiling / 2, ceiling)
+
+
+def _parse_retry_after_seconds(response: Any) -> float | None:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    value = headers.get("Retry-After")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    if value.isascii() and value.isdigit():
+        return float(value)
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=UTC)
+    return max((retry_at - datetime.now(UTC)).total_seconds(), 0.0)
 
 
 def _raise_for_status(response: Any) -> None:

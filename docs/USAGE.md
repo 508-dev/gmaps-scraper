@@ -107,6 +107,13 @@ uv run gmaps-scraper URL --fetch-mode browser
 Use `auto` or `browser` for place scraping. Both use the browser. The `curl`
 mode is available for saved lists only.
 
+HTTP requests for saved lists and place previews make up to three attempts on
+transient transport errors, HTTP 429, and HTTP 500/502/503/504. Each GET shares
+`--timeout-ms` across its attempts and delays, with a one-second minimum.
+Saved-list continuation and capped expansion share a single completion budget.
+Retries stop if a delay would exhaust the available budget or if
+`Retry-After` exceeds 30 seconds.
+
 Saved-list JSON includes `diagnostics` with the collector and source artifact,
 browser fallback status, and whether the HTTP preload was expanded or
 paginated. When Google reports a row total, `loaded_rows` and `expected_rows`

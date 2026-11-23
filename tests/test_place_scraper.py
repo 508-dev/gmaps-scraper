@@ -1293,6 +1293,7 @@ class PlaceScraperTests(unittest.TestCase):
             patch("gmaps_scraper.place_scraper._launch_browser_context", return_value=context),
             patch("gmaps_scraper.place_scraper._handle_google_consent"),
             patch("gmaps_scraper.place_scraper._import_curl_requests", return_value=curl_requests),
+            patch("gmaps_scraper.scraper.time.sleep"),
             self.assertLogs("gmaps_scraper.place_scraper", level="WARNING") as logs,
         ):
             snapshot = collect_place_snapshot(
@@ -1303,7 +1304,7 @@ class PlaceScraperTests(unittest.TestCase):
         self.assertEqual(snapshot["preview"], {})
         self.assertIn("ConnectionError", logs.output[0])
         self.assertNotIn("synthetic private response", logs.output[0])
-        session.get.assert_called_once_with(place_url)
+        self.assertEqual([call.args for call in session.get.call_args_list], [(place_url,)] * 3)
 
     def test_llm_policy_uses_repair_only_for_quality_failures(self) -> None:
         self.assertFalse(

@@ -537,17 +537,19 @@ class HttpArtifactTests(unittest.TestCase):
         session.get.side_effect = failure
         with (
             patch("gmaps_scraper.scraper._import_curl_requests", return_value=curl_requests),
+            patch("gmaps_scraper.scraper.time.sleep"),
             self.assertLogs("gmaps_scraper.scraper", level="WARNING") as logs,
             self.assertRaisesRegex(ScrapeError, "Failed to collect HTTP artifacts") as raised,
         ):
             collect_http_artifacts(source_url, timeout_ms=3000)
 
         self.assertIs(raised.exception.__cause__, failure)
-        session.get.assert_called_once_with(source_url)
-        self.assertEqual(len(logs.records), 1)
-        self.assertIn("ConnectionError", logs.output[0])
-        self.assertNotIn("private-value", logs.output[0])
-        self.assertEqual(logs.records[0].source_url_hash, sha256(source_url.encode()).hexdigest())
+        self.assertEqual([call.args for call in session.get.call_args_list], [(source_url,)] * 3)
+        self.assertEqual(len(logs.records), 3)
+        for record in logs.records:
+            self.assertIn("ConnectionError", record.getMessage())
+            self.assertNotIn("private-value", record.getMessage())
+            self.assertEqual(record.source_url_hash, sha256(source_url.encode()).hexdigest())
 
     def test_invalid_cookie_jar_stops_collection_with_a_load_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -757,7 +759,7 @@ class HttpArtifactTests(unittest.TestCase):
                 "hl": ["en"],
                 "pb": [f"!1m1!1slist-id!3e2!4i2!5Bnext-p_{page}!16b1"],
             })
-            self.assertEqual(kwargs, {"referer": result.resolved_url})
+            self.assertEqual(kwargs["referer"], result.resolved_url)
 
     def test_preserves_collected_rows_when_pagination_stops_early(self) -> None:
         bad_pages = {
@@ -868,7 +870,8 @@ class HttpArtifactTests(unittest.TestCase):
         self.assertEqual(result.resolved_url, canonical_url)
         self.assertEqual(len(result.places), 2)
         self.assertEqual(fake_requests.sessions[0].calls[-1], (
-            f"https://www.google.com{preload_path}", {"referer": canonical_url},
+            f"https://www.google.com{preload_path}",
+            {"referer": canonical_url, "timeout": 30.0},
         ))
 
     def test_collect_http_artifacts_returns_html_without_preload(self) -> None:
