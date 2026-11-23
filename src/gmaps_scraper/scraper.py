@@ -7,9 +7,11 @@ import json
 import re
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookiejar import LoadError, MozillaCookieJar
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Literal, Required, TypedDict, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -129,6 +131,38 @@ class HttpSessionConfig:
     proxy: str | None = None
 
 
+def _browser_session_for_parallel_worker(
+    browser_session: BrowserSessionConfig | None,
+    *,
+    worker_index: int,
+) -> BrowserSessionConfig | None:
+    if browser_session is None or browser_session.profile_dir is None:
+        return browser_session
+    return BrowserSessionConfig(
+        profile_dir=browser_session.profile_dir / f"worker-{worker_index + 1}",
+        proxy=browser_session.proxy,
+        window_size=browser_session.window_size,
+        human_mouse=browser_session.human_mouse,
+    )
+
+
+def _http_session_for_parallel_worker(
+    http_session: HttpSessionConfig | None,
+    *,
+    worker_index: int,
+) -> HttpSessionConfig | None:
+    if http_session is None or http_session.cookie_jar_path is None:
+        return http_session
+    cookie_jar_path = http_session.cookie_jar_path
+    return HttpSessionConfig(
+        cookie_jar_path=(
+            cookie_jar_path.parent
+            / f"{cookie_jar_path.stem}.worker-{worker_index + 1}{cookie_jar_path.suffix}"
+        ),
+        proxy=http_session.proxy,
+    )
+
+
 class ScrapeError(RuntimeError):
     """Raised when browser automation fails."""
 
@@ -165,34 +199,81 @@ def scrape_saved_lists(
     collection_mode: CollectionMode = DEFAULT_COLLECTION_MODE,
     browser_session: BrowserSessionConfig | None = None,
     http_session: HttpSessionConfig | None = None,
+    max_concurrency: int = 1,
+    max_retries: int = 0,
+    retry_backoff_ms: int = 2_000,
     stagger_ms: int = 0,
 ) -> list[SavedListScrapeResult]:
-    """Scrape saved lists in order and record failures in their per-URL results."""
-    results: list[SavedListScrapeResult] = []
+    """Scrape saved lists, returning per-URL results in input order.
+
+    Parallel workers keep separate persistent browser profiles and cookie jars.
+    Each retry reruns collection and parsing for its own URL.
+    """
     urls = [url.strip() for url in list_urls if url.strip()]
-    for index, list_url in enumerate(urls):
-        if index > 0 and stagger_ms > 0:
-            time.sleep(stagger_ms / 1000)
-        try:
-            saved_list = scrape_saved_list(
-                list_url,
-                headless=headless,
-                timeout_ms=timeout_ms,
-                settle_time_ms=settle_time_ms,
-                collection_mode=collection_mode,
-                browser_session=browser_session,
-                http_session=http_session,
-            )
-        except Exception as exc:
-            results.append(
-                SavedListScrapeResult(
-                    source_url=list_url,
-                    error=str(exc) or "Saved-list scrape failed.",
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be at least 1.")
+    if max_retries < 0:
+        raise ValueError("max_retries must be non-negative.")
+    if not urls:
+        return []
+    worker_count = min(max_concurrency, len(urls))
+
+    def scrape_one(
+        list_url: str,
+        worker_browser_session: BrowserSessionConfig | None,
+        worker_http_session: HttpSessionConfig | None,
+    ) -> SavedListScrapeResult:
+        last_error = "Saved-list scrape failed."
+        total_attempts = max_retries + 1
+        for attempt in range(1, total_attempts + 1):
+            try:
+                saved_list = scrape_saved_list(
+                    list_url,
+                    headless=headless,
+                    timeout_ms=timeout_ms,
+                    settle_time_ms=settle_time_ms,
+                    collection_mode=collection_mode,
+                    browser_session=worker_browser_session,
+                    http_session=worker_http_session,
                 )
+            except Exception as exc:
+                last_error = str(exc) or "Saved-list scrape failed."
+            else:
+                return SavedListScrapeResult(list_url, saved_list=saved_list, attempts=attempt)
+            if attempt < total_attempts and retry_backoff_ms > 0:
+                time.sleep(attempt * retry_backoff_ms / 1000)
+        return SavedListScrapeResult(list_url, error=last_error, attempts=total_attempts)
+
+    def scrape_worker(worker_index: int) -> list[SavedListScrapeResult]:
+        worker_browser_session = browser_session
+        worker_http_session = http_session
+        if max_concurrency > 1:
+            worker_browser_session = _browser_session_for_parallel_worker(
+                browser_session, worker_index=worker_index
             )
-        else:
-            results.append(SavedListScrapeResult(source_url=list_url, saved_list=saved_list))
-    return results
+            worker_http_session = _http_session_for_parallel_worker(
+                http_session, worker_index=worker_index
+            )
+        if worker_index > 0 and stagger_ms > 0:
+            time.sleep(worker_index * stagger_ms / 1000)
+
+        results: list[SavedListScrapeResult] = []
+        worker_urls = urls[worker_index::worker_count]
+        for index, list_url in enumerate(worker_urls):
+            if index > 0 and stagger_ms > 0:
+                time.sleep(stagger_ms / 1000)
+            results.append(scrape_one(list_url, worker_browser_session, worker_http_session))
+        return results
+
+    if worker_count == 1:
+        return scrape_worker(0)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        worker_results = executor.map(scrape_worker, range(worker_count))
+        # Each worker processes every nth URL, so interleave its results to restore input order.
+        return [
+            result for row in zip_longest(*worker_results) for result in row if result is not None
+        ]
 
 
 def collect_saved_list_result(

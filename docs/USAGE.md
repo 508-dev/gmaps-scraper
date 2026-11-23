@@ -64,9 +64,9 @@ Pass URLs as positional arguments, through `--input`, or both.
 | `--debug-output-dir PATH` | Off | Write raw extraction artifacts for a single URL to this directory. |
 | `--screenshot-output-dir PATH` | Off | Write place-page screenshots to this directory. |
 | `--input PATH` | Unset | Append URLs from a newline-delimited file, or use `-` for standard input. |
-| `--max-concurrency N` | `1` | Set the number of place batch workers. |
-| `--max-retries N` | `1` | Set the number of retries per place in a batch. |
-| `--retry-backoff-ms MS` | `2000` | Set the place batch retry delay multiplier in milliseconds. |
+| `--max-concurrency N` | `1` | Set the number of batch workers. |
+| `--max-retries N` | `0` for lists, `1` for places | Set the number of retries per URL in a batch. |
+| `--retry-backoff-ms MS` | `2000` | Set the initial batch retry delay in milliseconds. Successive delays increase linearly. |
 | `--stagger-ms MS` | `0` | Delay starts between batch URLs or place workers. |
 | `--fail-on-error` | Off | Write batch results, then exit with status `1` if any URL failed. |
 | `--llm-repair` | Off | Enable optional OpenAI-compatible LLM repair for places. |
@@ -88,7 +88,7 @@ cookies used by the HTTP client.
 
 `--timeout-ms` controls operations such as browser navigation and HTTP requests.
 `--settle-ms` adds a browser-only wait. Batch runs also include any delays from
-`--stagger-ms` and place retries.
+`--stagger-ms` and retries.
 
 ## Fetch Modes
 
@@ -131,10 +131,16 @@ kind of batch writes all its results before returning status `1` when
 `--fail-on-error` is set and any scrape fails. By default, the status is `0`
 when the batch finishes and writes its results.
 
-Saved-list batches run sequentially, using the same configured browser profile
-and HTTP cookie jar for each URL. `--stagger-ms` adds a delay between URLs.
-Batch debug dumps and the place-specific retry and concurrency controls are
-unavailable for saved lists.
+Saved-list batches default to one worker, using the configured browser profile
+and HTTP cookie jar for each URL. With `--max-concurrency` above `1`, workers
+use separate profile subdirectories and cookie jars. `--stagger-ms` adds a
+delay before each worker starts and between URLs within each worker. Debug
+dumps are available for single-list runs.
+
+Use `--max-retries` to retry failures per URL. Saved-list batches default to
+zero retries. `--retry-backoff-ms` sets the initial delay, which increases
+linearly on successive retries. Results include `attempts` for URLs tried
+more than once.
 
 The Python library exposes the same workflow through `scrape_saved_lists(urls)`,
 which returns `SavedListScrapeResult` objects with `saved_list` and `error`

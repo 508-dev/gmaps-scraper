@@ -172,6 +172,9 @@ class CliTests(unittest.TestCase):
                     collection_mode="auto",
                     browser_session=None,
                     http_session=None,
+                    max_concurrency=1,
+                    max_retries=0,
+                    retry_backoff_ms=2_000,
                     stagger_ms=250,
                 )
                 self.assertEqual(
@@ -202,6 +205,12 @@ class CliTests(unittest.TestCase):
                         "--output",
                         str(output_path),
                         "--fail-on-error",
+                        "--max-concurrency",
+                        "2",
+                        "--max-retries",
+                        "1",
+                        "--retry-backoff-ms",
+                        "50",
                     ],
                 ),
                 patch(
@@ -211,7 +220,19 @@ class CliTests(unittest.TestCase):
             ):
                 self.assertEqual(main(), 1)
 
-            self.assertEqual(scrape.call_args.args[0], [url])
+            scrape.assert_called_once_with(
+                [url],
+                headless=True,
+                timeout_ms=30_000,
+                settle_time_ms=3_000,
+                collection_mode="auto",
+                browser_session=None,
+                http_session=None,
+                max_concurrency=2,
+                max_retries=1,
+                retry_backoff_ms=50,
+                stagger_ms=0,
+            )
             self.assertEqual(
                 json.loads(output_path.read_text(encoding="utf-8")),
                 {"results": [{"source_url": url, "error": "unavailable"}]},

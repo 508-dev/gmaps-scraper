@@ -36,8 +36,10 @@ from gmaps_scraper.scraper import (
     BrowserSessionConfig,
     HttpSessionConfig,
     ScrapeError,
+    _browser_session_for_parallel_worker,
     _extract_preloaded_fetch_url,
     _handle_google_consent,
+    _http_session_for_parallel_worker,
     _import_curl_requests,
     _launch_browser_context,
     _load_http_cookie_jar,
@@ -1538,38 +1540,6 @@ def _scrape_places_parallel(
                 results[index] = result
 
     return [result for result in results if result is not None]
-
-
-def _browser_session_for_parallel_worker(
-    browser_session: BrowserSessionConfig | None,
-    *,
-    worker_index: int,
-) -> BrowserSessionConfig | None:
-    if browser_session is None or browser_session.profile_dir is None:
-        return browser_session
-    return BrowserSessionConfig(
-        profile_dir=browser_session.profile_dir / f"worker-{worker_index + 1}",
-        proxy=browser_session.proxy,
-        window_size=browser_session.window_size,
-        human_mouse=browser_session.human_mouse,
-    )
-
-
-def _http_session_for_parallel_worker(
-    http_session: HttpSessionConfig | None,
-    *,
-    worker_index: int,
-) -> HttpSessionConfig | None:
-    if http_session is None or http_session.cookie_jar_path is None:
-        return http_session
-    cookie_jar_path = http_session.cookie_jar_path
-    return HttpSessionConfig(
-        cookie_jar_path=(
-            cookie_jar_path.parent
-            / f"{cookie_jar_path.stem}.worker-{worker_index + 1}{cookie_jar_path.suffix}"
-        ),
-        proxy=http_session.proxy,
-    )
 
 
 def _scrape_place_with_context_and_retries(
